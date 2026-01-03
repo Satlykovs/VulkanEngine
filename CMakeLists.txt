@@ -45,25 +45,24 @@ target_link_libraries(MyEngine PRIVATE
 )
 
 
-
-
 find_program(CLANG_FORMAT_EXE clang-format)
 
 if (CLANG_FORMAT_EXE)
     add_custom_target(
             check-format
-            COMMAND ${CLANG_FORMAT_EXE} -style=file --dry-run --Werror ${SOURCES}
-            COMMENT "Checking code formatting... (will fail if needs formatting)"
+            COMMAND ${CLANG_FORMAT_EXE} -style=file --dry-run --Werror -verbose ${SOURCES}
+            COMMENT "Checking code formatting..."
             VERBATIM
     )
 
     add_custom_target(
             format
-            COMMAND ${CLANG_FORMAT_EXE} -style=file -i ${SOURCES}
+            COMMAND ${CLANG_FORMAT_EXE} -style=file -i -verbose ${SOURCES}
             COMMENT "Formatting all source files..."
             VERBATIM
     )
+
     add_dependencies(MyEngine check-format)
 else ()
-    message(WARNING "clang-format not found! Formatting targets disabled.")
+    message(WARNING "clang-format not found!")
 endif ()

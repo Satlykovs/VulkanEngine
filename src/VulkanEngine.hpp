@@ -9,11 +9,14 @@ class VulkanEngine
 {
 public:
     void init();
+
     void run();
+
     void cleanup();
 
 private:
     void initWindow();
+
     void initVulkan();
 
     [[nodiscard]] bool checkValidationLayerSupport() const;
