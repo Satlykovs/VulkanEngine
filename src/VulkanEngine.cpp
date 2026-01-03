@@ -27,6 +27,11 @@ void VulkanEngine::cleanup()
 {
     spdlog::info("Cleaning up...");
 
+    if (device_)
+    {
+        device_.destroy();
+    }
+
     if (instance_)
     {
         instance_.destroy();
@@ -75,6 +80,9 @@ void VulkanEngine::initVulkan()
     {
         instance_ = vk::createInstance(createInfo);
         spdlog::info("Vulkan Instance created successfully");
+
+        pickPhysicalDevice();
+        createLogicalDevice();
     }
     catch (const vk::SystemError& err)
     {
@@ -106,4 +114,87 @@ void VulkanEngine::initVulkan()
         }
     }
     return true;
+}
+
+void VulkanEngine::pickPhysicalDevice()
+{
+    std::vector<vk::PhysicalDevice> devices = instance_.enumeratePhysicalDevices();
+
+    if (devices.empty())
+    {
+        throw std::runtime_error("Failed to find GPUs with Vulkan support");
+    }
+    spdlog::info("Devices found: {}", devices.size());
+
+    for (const auto& device : devices)
+    {
+        vk::PhysicalDeviceProperties properties = device.getProperties();
+
+        spdlog::info(" - Checking device: {}", properties.deviceName);
+
+        if (properties.deviceType == vk::PhysicalDeviceType::eDiscreteGpu)
+        {
+            physicalDevice_ = device;
+            spdlog::info("   -> Selected Discrete GPU!");
+            break;
+        }
+    }
+
+    if (!physicalDevice_)
+    {
+        physicalDevice_ = devices[0];
+        spdlog::warn("Discrete GPU not found. Using fallback: {}",
+                     physicalDevice_.getProperties().deviceName);
+    }
+
+    spdlog::info("Final GPU: {}", physicalDevice_.getProperties().deviceName);
+}
+
+VulkanEngine::QueueFamilyIndices VulkanEngine::findQueueFamilies(
+    const vk::PhysicalDevice& device) const
+{
+    QueueFamilyIndices indices;
+
+    std::vector<vk::QueueFamilyProperties> queueFamilies = device.getQueueFamilyProperties();
+
+    int i = 0;
+    for (const auto& queueFamily : queueFamilies)
+    {
+        if (queueFamily.queueFlags & vk::QueueFlagBits::eGraphics)
+        {
+            indices.graphicsFamily = i;
+        }
+
+        if (indices.isComplete())
+        {
+            break;
+        }
+        ++i;
+    }
+    return indices;
+}
+
+void VulkanEngine::createLogicalDevice()
+{
+    QueueFamilyIndices indices = findQueueFamilies(physicalDevice_);
+
+    float queuePriority = 1.0f;
+    vk::DeviceQueueCreateInfo queueCreateInfo({}, indices.graphicsFamily.value(), 1,
+                                              &queuePriority);
+
+    vk::PhysicalDeviceFeatures deviceFeatures{};
+
+    vk::DeviceCreateInfo createInfo({}, queueCreateInfo, {}, {}, &deviceFeatures);
+
+    try
+    {
+        device_ = physicalDevice_.createDevice(createInfo);
+        spdlog::info("Logical Device created successfully");
+
+        graphicsQueue_ = device_.getQueue(indices.graphicsFamily.value(), 0);
+    }
+    catch (const vk::SystemError& err)
+    {
+        throw std::runtime_error("Failed to create Logical Device");
+    }
 }

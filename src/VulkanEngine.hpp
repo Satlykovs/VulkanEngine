@@ -1,5 +1,6 @@
 #pragma once
 
+#include <optional>
 #include <vector>
 #include <vulkan/vulkan.hpp>
 
@@ -19,7 +20,23 @@ private:
 
     void initVulkan();
 
+    void pickPhysicalDevice();
+
+    void createLogicalDevice();
+
     [[nodiscard]] bool checkValidationLayerSupport() const;
+
+    struct QueueFamilyIndices
+    {
+        std::optional<uint32_t> graphicsFamily;
+
+        [[nodiscard]] bool isComplete() const
+        {
+            return graphicsFamily.has_value();
+        }
+    };
+
+    [[nodiscard]] QueueFamilyIndices findQueueFamilies(const vk::PhysicalDevice& device) const;
 
     const int WIDTH = 800;
     const int HEIGHT = 600;
@@ -27,6 +44,12 @@ private:
     GLFWwindow* window_ = nullptr;
 
     vk::Instance instance_;
+
+    vk::PhysicalDevice physicalDevice_ = nullptr;
+
+    vk::Device device_;
+
+    vk::Queue graphicsQueue_;
 
     const std::vector<const char*> validationLayers = {"VK_LAYER_KHRONOS_validation"};
 
