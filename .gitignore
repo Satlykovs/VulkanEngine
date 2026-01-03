@@ -1,0 +1,14 @@
+/build/
+/cmake-build-debug/
+/cmake-build-release/
+
+/.idea/
+/.vscode/
+
+*.exe
+*.dll
+*.so
+*.lib
+*.a
+
+*.log
