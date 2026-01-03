@@ -1,0 +1,35 @@
+Language: Cpp
+BasedOnStyle: Google
+
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ColumnLimit: 100
+
+
+BreakBeforeBraces: Allman
+
+PointerAlignment: Left
+
+SortIncludes: true
+
+IncludeBlocks: Regroup
+
+IncludeCategories:
+  - Regex: '^<.*>'
+    Priority: 1
+  - Regex: '^".*"'
+    Priority: 2
+
+
+AccessModifierOffset: -4
+
+FixNamespaceComments: true
+
+AllowShortFunctionsOnASingleLine: Empty
+
+AllowShortIfStatementsOnASingleLine: false
+AllowShortLoopsOnASingleLine: false
+
+
+AlignAfterOpenBracket: Align
