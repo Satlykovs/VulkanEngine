@@ -19,6 +19,7 @@ private:
     void initWindow();
 
     void initVulkan();
+    void createSurface();
 
     void pickPhysicalDevice();
 
@@ -29,10 +30,11 @@ private:
     struct QueueFamilyIndices
     {
         std::optional<uint32_t> graphicsFamily;
+        std::optional<uint32_t> presentFamily;
 
         [[nodiscard]] bool isComplete() const
         {
-            return graphicsFamily.has_value();
+            return graphicsFamily.has_value() && presentFamily.has_value();
         }
     };
 
@@ -44,12 +46,14 @@ private:
     GLFWwindow* window_ = nullptr;
 
     vk::Instance instance_;
+    vk::SurfaceKHR surface_;
 
     vk::PhysicalDevice physicalDevice_ = nullptr;
 
     vk::Device device_;
 
     vk::Queue graphicsQueue_;
+    vk::Queue presentQueue_;
 
     const std::vector<const char*> validationLayers = {"VK_LAYER_KHRONOS_validation"};
 

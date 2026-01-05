@@ -4,6 +4,7 @@
 #define GLFW_INCLUDE_VULKAN
 #include <glfw/glfw3.h>
 #include <iostream>
+#include <set>
 
 void VulkanEngine::init()
 {
@@ -30,6 +31,11 @@ void VulkanEngine::cleanup()
     if (device_)
     {
         device_.destroy();
+    }
+
+    if (instance_ && surface_)
+    {
+        instance_.destroySurfaceKHR(surface_);
     }
 
     if (instance_)
@@ -80,6 +86,8 @@ void VulkanEngine::initVulkan()
     {
         instance_ = vk::createInstance(createInfo);
         spdlog::info("Vulkan Instance created successfully");
+
+        createSurface();
 
         pickPhysicalDevice();
         createLogicalDevice();
@@ -165,6 +173,11 @@ VulkanEngine::QueueFamilyIndices VulkanEngine::findQueueFamilies(
             indices.graphicsFamily = i;
         }
 
+        if (device.getSurfaceSupportKHR(i, surface_))
+        {
+            indices.presentFamily = i;
+        }
+
         if (indices.isComplete())
         {
             break;
@@ -178,13 +191,24 @@ void VulkanEngine::createLogicalDevice()
 {
     QueueFamilyIndices indices = findQueueFamilies(physicalDevice_);
 
+    std::vector<vk::DeviceQueueCreateInfo> queueCreateInfos;
+    std::set<uint32_t> uniqueQueueFamilies = {indices.graphicsFamily.value(),
+                                              indices.presentFamily.value()};
+
     float queuePriority = 1.0f;
-    vk::DeviceQueueCreateInfo queueCreateInfo({}, indices.graphicsFamily.value(), 1,
-                                              &queuePriority);
+
+    for (uint32_t queueFamily : uniqueQueueFamilies)
+    {
+        vk::DeviceQueueCreateInfo queueCreateInfo({}, queueFamily, 1, &queuePriority);
+
+        queueCreateInfos.push_back(queueCreateInfo);
+    }
+
+    const std::vector<const char*> deviceExtensions = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
 
     vk::PhysicalDeviceFeatures deviceFeatures{};
 
-    vk::DeviceCreateInfo createInfo({}, queueCreateInfo, {}, {}, &deviceFeatures);
+    vk::DeviceCreateInfo createInfo({}, queueCreateInfos, {}, deviceExtensions, &deviceFeatures);
 
     try
     {
@@ -192,9 +216,23 @@ void VulkanEngine::createLogicalDevice()
         spdlog::info("Logical Device created successfully");
 
         graphicsQueue_ = device_.getQueue(indices.graphicsFamily.value(), 0);
+        presentQueue_ = device_.getQueue(indices.presentFamily.value(), 0);
     }
     catch (const vk::SystemError& err)
     {
         throw std::runtime_error("Failed to create Logical Device");
     }
+}
+
+void VulkanEngine::createSurface()
+{
+    VkSurfaceKHR surface;
+
+    if (glfwCreateWindowSurface(instance_, window_, nullptr, &surface) != VK_SUCCESS)
+    {
+        throw std::runtime_error("Failed to create window surface");
+    }
+
+    surface_ = surface;
+    spdlog::info("Window Surface created successfully");
 }
