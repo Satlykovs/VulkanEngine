@@ -26,7 +26,7 @@ FetchContent_MakeAvailable(glm)
 FetchContent_Declare(
         spdlog
         GIT_REPOSITORY https://github.com/gabime/spdlog.git
-        GIT_TAG v1.12.0
+        GIT_TAG        v1.12.0
 )
 
 FetchContent_MakeAvailable(spdlog)
@@ -66,3 +66,38 @@ if (CLANG_FORMAT_EXE)
 else ()
     message(WARNING "clang-format not found!")
 endif ()
+
+
+find_program(GLSLC_EXE glslc HINTS $ENV{VULKAN_SDK}/bin)
+
+if (NOT GLSLC_EXE)
+    message(FATAL_ERROR "glslc not found! Check VULKAN_SDK path.")
+endif ()
+
+
+file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/shaders)
+
+file(GLOB_RECURSE SHADERS "shaders/*.vert" "shaders/*.frag")
+
+
+foreach (SOURCE_FILE IN LISTS SHADERS)
+    get_filename_component(FILE_NAME ${SOURCE_FILE} NAME)
+
+    set(OUTPUT_FILE "${CMAKE_BINARY_DIR}/shaders/${FILE_NAME}.spv")
+
+
+    add_custom_command(
+            OUTPUT ${OUTPUT_FILE}
+            COMMAND ${GLSLC_EXE} ${SOURCE_FILE} -o ${OUTPUT_FILE}
+            DEPENDS ${SOURCE_FILE}
+            COMMENT "Compiling shader: ${SOURCE_FILE} -> ${OUTPUT_FILE}"
+    )
+
+    list (APPEND SPV_FILES ${OUTPUT_FILE})
+
+endforeach ()
+
+
+add_custom_target(Shaders ALL DEPENDS ${SPV_FILES})
+
+add_dependencies(MyEngine Shaders)

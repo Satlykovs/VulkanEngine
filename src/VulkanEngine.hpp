@@ -26,6 +26,12 @@ private:
 
     void createLogicalDevice();
 
+    void createGraphicsPipeline();
+
+    void initSyncObjects();
+
+    void drawFrame();
+
     [[nodiscard]] bool checkValidationLayerSupport() const;
 
     struct QueueFamilyIndices
@@ -65,6 +71,9 @@ private:
     void createSwapChain();
     void createImageViews();
 
+    static std::vector<char> readFile(const std::string& filename);
+    vk::ShaderModule createShaderModule(const std::vector<char>& code);
+
     const int WIDTH = 800;
     const int HEIGHT = 600;
 
@@ -85,6 +94,20 @@ private:
     vk::Format swapChainImageFormat_;
     vk::Extent2D swapChainExtent_;
     std::vector<vk::ImageView> swapChainImageViews_;
+
+    vk::PipelineLayout pipelineLayout_;
+    vk::Pipeline graphicsPipeline_;
+
+    vk::CommandPool commandPool_;
+
+    std::vector<vk::CommandBuffer> commandBuffers_;
+
+    static const int MAX_FRAMES_IN_FLIGHT = 2;
+    std::vector<vk::Semaphore> imageAvailableSemaphores_;
+    std::vector<vk::Semaphore> renderFinishedSemaphores_;
+    std::vector<vk::Fence> inFlightFences_;
+
+    uint32_t currentFrame_ = 0;
 
     const std::vector<const char*> validationLayers = {"VK_LAYER_KHRONOS_validation"};
 

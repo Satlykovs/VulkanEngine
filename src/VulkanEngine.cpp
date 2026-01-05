@@ -3,6 +3,7 @@
 #include <spdlog/spdlog.h>
 #define GLFW_INCLUDE_VULKAN
 #include <algorithm>
+#include <fstream>
 #include <glfw/glfw3.h>
 #include <iostream>
 #include <limits>
@@ -21,7 +22,10 @@ void VulkanEngine::run()
     while (!glfwWindowShouldClose(window_))
     {
         glfwPollEvents();
+        drawFrame();
     }
+
+    device_.waitIdle();
 
     spdlog::info("Main Loop Ended");
 }
@@ -30,13 +34,30 @@ void VulkanEngine::cleanup()
 {
     spdlog::info("Cleaning up...");
 
-    for (auto imageView : swapChainImageViews_)
-    {
-        device_.destroyImageView(imageView);
-    }
-
     if (device_)
     {
+        device_.waitIdle();
+
+        for (int i = 0; i < swapChainImages_.size(); ++i)
+        {
+            device_.destroySemaphore(renderFinishedSemaphores_[i]);
+        }
+
+        for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+        {
+            device_.destroySemaphore(imageAvailableSemaphores_[i]);
+            device_.destroyFence(inFlightFences_[i]);
+        }
+        device_.destroyCommandPool(commandPool_);
+
+        device_.destroyPipeline(graphicsPipeline_);
+        device_.destroyPipelineLayout(pipelineLayout_);
+
+        for (auto imageView : swapChainImageViews_)
+        {
+            device_.destroyImageView(imageView);
+        }
+
         device_.destroySwapchainKHR(swapChain_);
         device_.destroy();
     }
@@ -102,6 +123,10 @@ void VulkanEngine::initVulkan()
 
         createSwapChain();
         createImageViews();
+
+        createGraphicsPipeline();
+
+        initSyncObjects();
     }
     catch (const vk::SystemError& err)
     {
@@ -217,9 +242,15 @@ void VulkanEngine::createLogicalDevice()
 
     const std::vector<const char*> deviceExtensions = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
 
-    vk::PhysicalDeviceFeatures deviceFeatures{};
+    vk::PhysicalDeviceDynamicRenderingFeatures dynamicRenderingFeatures{};
+    dynamicRenderingFeatures.dynamicRendering = VK_TRUE;
 
-    vk::DeviceCreateInfo createInfo({}, queueCreateInfos, {}, deviceExtensions, &deviceFeatures);
+    vk::PhysicalDeviceFeatures2 deviceFeatures2{};
+    deviceFeatures2.pNext = &dynamicRenderingFeatures;
+
+    vk::DeviceCreateInfo createInfo({}, queueCreateInfos, {}, deviceExtensions, nullptr);
+
+    createInfo.pNext = &deviceFeatures2;
 
     try
     {
@@ -403,4 +434,261 @@ void VulkanEngine::createImageViews()
     }
 
     spdlog::info("Image Views created successfully");
+}
+
+std::vector<char> VulkanEngine::readFile(const std::string& filename)
+{
+    std::ifstream file(filename, std::ios::ate | std::ios::binary);
+
+    if (!file.is_open())
+    {
+        throw std::runtime_error("Failed to open shader file: " + filename);
+    }
+
+    size_t fileSize = static_cast<size_t>(file.tellg());
+
+    std::vector<char> buffer(fileSize);
+    file.seekg(0);
+
+    file.read(buffer.data(), fileSize);
+
+    file.close();
+
+    return buffer;
+}
+
+vk::ShaderModule VulkanEngine::createShaderModule(const std::vector<char>& code)
+{
+    vk::ShaderModuleCreateInfo createInfo({}, code.size(),
+                                          reinterpret_cast<const uint32_t*>(code.data()));
+
+    try
+    {
+        return device_.createShaderModule(createInfo);
+    }
+    catch (const vk::SystemError& err)
+    {
+        throw std::runtime_error(std::string("Failed to create Shader Module: ") + err.what());
+    }
+}
+
+void VulkanEngine::createGraphicsPipeline()
+{
+    auto vertShaderCode = readFile("shaders/shader.vert.spv");
+    auto fragShaderCode = readFile("shaders/shader.frag.spv");
+
+    vk::ShaderModule vertShaderModule = createShaderModule(vertShaderCode);
+    vk::ShaderModule fragShaderModule = createShaderModule(fragShaderCode);
+
+    vk::PipelineShaderStageCreateInfo vertShaderStageInfo({}, vk::ShaderStageFlagBits::eVertex,
+                                                          vertShaderModule, "main");
+
+    vk::PipelineShaderStageCreateInfo fragShaderStageInfo({}, vk::ShaderStageFlagBits::eFragment,
+                                                          fragShaderModule, "main");
+
+    vk::PipelineShaderStageCreateInfo shaderStages[] = {vertShaderStageInfo, fragShaderStageInfo};
+
+    vk::PipelineVertexInputStateCreateInfo vertexInputInfo({}, 0, nullptr, 0, nullptr);
+
+    vk::PipelineInputAssemblyStateCreateInfo inputAssembly({}, vk::PrimitiveTopology::eTriangleList,
+                                                           VK_FALSE);
+
+    vk::Viewport viewport(0.0F, 0.0F, static_cast<float>(swapChainExtent_.width),
+                          static_cast<float>(swapChainExtent_.height), 0.0F, 1.0F);
+
+    vk::Rect2D scissor({0, 0}, swapChainExtent_);
+
+    vk::PipelineViewportStateCreateInfo viewportState({}, 1, &viewport, 1, &scissor);
+
+    vk::PipelineRasterizationStateCreateInfo rasterizer(
+        {}, VK_FALSE, VK_FALSE, vk::PolygonMode::eFill, vk::CullModeFlagBits::eBack,
+        vk::FrontFace::eClockwise, VK_FALSE, 0.0F, 0.0F, 0.0F, 1.0F);
+
+    vk::PipelineMultisampleStateCreateInfo multisampling({}, vk::SampleCountFlagBits::e1, VK_FALSE);
+
+    vk::PipelineColorBlendAttachmentState colorBlendAttachment;
+    colorBlendAttachment.colorWriteMask =
+        vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG |
+        vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA;
+    colorBlendAttachment.blendEnable = VK_FALSE;
+
+    vk::PipelineColorBlendStateCreateInfo colorBlending({}, VK_FALSE, vk::LogicOp::eCopy, 1,
+                                                        &colorBlendAttachment);
+
+    vk::PipelineLayoutCreateInfo pipelineLayoutInfo({}, 0, nullptr, 0, nullptr);
+
+    try
+    {
+        pipelineLayout_ = device_.createPipelineLayout(pipelineLayoutInfo);
+    }
+    catch (const vk::SystemError& err)
+    {
+        throw std::runtime_error(std::string("Failed to create Pipeline Layout: ") + err.what());
+    }
+
+    vk::PipelineRenderingCreateInfo renderingInfo({}, 1, &swapChainImageFormat_);
+    renderingInfo.depthAttachmentFormat = vk::Format::eUndefined;
+    renderingInfo.stencilAttachmentFormat = vk::Format::eUndefined;
+
+    // clang-format off
+    vk::GraphicsPipelineCreateInfo pipelineInfo(
+        {},
+        2, shaderStages,
+        &vertexInputInfo,
+        &inputAssembly,
+        nullptr,
+        &viewportState,
+        &rasterizer,
+        &multisampling,
+        nullptr,
+        &colorBlending,
+        nullptr,
+        pipelineLayout_,
+        nullptr
+    );
+    // clang-format on
+
+    pipelineInfo.pNext = &renderingInfo;
+
+    auto result = device_.createGraphicsPipeline(nullptr, pipelineInfo);
+    if (result.result != vk::Result::eSuccess)
+    {
+        throw std::runtime_error("Failed to create Graphics Pipeline");
+    }
+
+    graphicsPipeline_ = result.value;
+
+    spdlog::info("Graphics Pipeline created successfully");
+
+    device_.destroyShaderModule(vertShaderModule);
+    device_.destroyShaderModule(fragShaderModule);
+}
+
+void VulkanEngine::initSyncObjects()
+{
+    QueueFamilyIndices queueFamilyIndices = findQueueFamilies(physicalDevice_);
+
+    vk::CommandPoolCreateInfo poolInfo(vk::CommandPoolCreateFlagBits::eResetCommandBuffer,
+                                       queueFamilyIndices.graphicsFamily.value());
+
+    commandPool_ = device_.createCommandPool(poolInfo);
+
+    vk::CommandBufferAllocateInfo allocInfo(commandPool_, vk::CommandBufferLevel::ePrimary,
+                                            MAX_FRAMES_IN_FLIGHT);
+
+    commandBuffers_ = device_.allocateCommandBuffers(allocInfo);
+    imageAvailableSemaphores_.resize(MAX_FRAMES_IN_FLIGHT);
+    renderFinishedSemaphores_.resize(swapChainImages_.size());
+    inFlightFences_.resize(MAX_FRAMES_IN_FLIGHT);
+
+    vk::SemaphoreCreateInfo semaphoreInfo{};
+    vk::FenceCreateInfo fenceInfo(vk::FenceCreateFlagBits::eSignaled);
+
+    try
+    {
+        for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+        {
+            imageAvailableSemaphores_[i] = device_.createSemaphore(semaphoreInfo);
+
+            inFlightFences_[i] = device_.createFence(fenceInfo);
+        }
+
+        for (int i = 0; i < swapChainImages_.size(); ++i)
+        {
+            renderFinishedSemaphores_[i] = device_.createSemaphore(semaphoreInfo);
+        }
+    }
+    catch (const vk::SystemError& err)
+    {
+        throw std::runtime_error(std::string("Failed to create sync objects for a frame: ") +
+                                 err.what());
+    }
+
+    spdlog::info("Sync objects created successfully");
+}
+
+void VulkanEngine::drawFrame()
+{
+    vk::Fence& inFlightFence = inFlightFences_[currentFrame_];
+    vk::Semaphore& imageAvailableSemaphore = imageAvailableSemaphores_[currentFrame_];
+    vk::CommandBuffer& commandBuffer = commandBuffers_[currentFrame_];
+
+    (void)device_.waitForFences(1, &inFlightFence, vk::True, UINT64_MAX);
+    (void)device_.resetFences(1, &inFlightFence);
+
+    auto acquireResult =
+        device_.acquireNextImageKHR(swapChain_, UINT64_MAX, imageAvailableSemaphore, nullptr);
+
+    uint32_t imageIndex = acquireResult.value;
+
+    vk::Semaphore& renderFinishedSemaphore = renderFinishedSemaphores_[imageIndex];
+
+    commandBuffer.reset();
+
+    vk::CommandBufferBeginInfo beginInfo{};
+
+    commandBuffer.begin(beginInfo);
+
+    // clang-format off
+    vk::ImageMemoryBarrier imageBarrierToAttachment(
+        {},
+        vk::AccessFlagBits::eColorAttachmentWrite,
+        vk::ImageLayout::eUndefined,
+        vk::ImageLayout::eColorAttachmentOptimal,
+        vk::QueueFamilyIgnored,
+        vk::QueueFamilyIgnored,
+        swapChainImages_[imageIndex],
+        {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1});
+
+    // clang-format on
+    commandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe,
+                                  vk::PipelineStageFlagBits::eColorAttachmentOutput, {}, 0, nullptr,
+                                  0, nullptr, 1, &imageBarrierToAttachment);
+
+    vk::ClearValue clearColor(std::array<float, 4>{0.1F, 0.1F, 0.1F, 1.0F});
+    vk::RenderingAttachmentInfo colorAttachment{};
+    colorAttachment.imageView = swapChainImageViews_[imageIndex];
+    colorAttachment.imageLayout = vk::ImageLayout::eColorAttachmentOptimal;
+    colorAttachment.loadOp = vk::AttachmentLoadOp::eClear;
+    colorAttachment.storeOp = vk::AttachmentStoreOp::eStore;
+    colorAttachment.clearValue = clearColor;
+
+    vk::RenderingInfo renderInfo({}, {{0, 0}, swapChainExtent_}, 1, 0, 1, &colorAttachment);
+
+    commandBuffer.beginRendering(renderInfo);
+    commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, graphicsPipeline_);
+    commandBuffer.draw(3, 1, 0, 0);
+    commandBuffer.endRendering();
+
+    // clang-format off
+    vk::ImageMemoryBarrier imageBarrierToPresent(
+        vk::AccessFlagBits::eColorAttachmentWrite,
+        {},
+        vk::ImageLayout::eColorAttachmentOptimal,
+        vk::ImageLayout::ePresentSrcKHR,
+        vk::QueueFamilyIgnored,
+        vk::QueueFamilyIgnored,
+        swapChainImages_[imageIndex],
+        {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1});
+
+    // clang-format on
+
+    commandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eColorAttachmentOutput,
+                                  vk::PipelineStageFlagBits::eBottomOfPipe, {}, 0, nullptr, 0,
+                                  nullptr, 1, &imageBarrierToPresent);
+
+    commandBuffer.end();
+
+    vk::PipelineStageFlags waitStage = vk::PipelineStageFlagBits::eColorAttachmentOutput;
+
+    vk::SubmitInfo submitInfo(1, &imageAvailableSemaphore, &waitStage, 1, &commandBuffer, 1,
+                              &renderFinishedSemaphore);
+
+    (void)graphicsQueue_.submit(1, &submitInfo, inFlightFence);
+
+    vk::PresentInfoKHR presentInfo(1, &renderFinishedSemaphore, 1, &swapChain_, &imageIndex);
+
+    (void)presentQueue_.presentKHR(presentInfo);
+
+    currentFrame_ = (currentFrame_ + 1) % MAX_FRAMES_IN_FLIGHT;
 }
