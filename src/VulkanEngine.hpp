@@ -19,6 +19,7 @@ private:
     void initWindow();
 
     void initVulkan();
+
     void createSurface();
 
     void pickPhysicalDevice();
@@ -38,7 +39,31 @@ private:
         }
     };
 
+    struct SwapChainSupportDetails
+    {
+        vk::SurfaceCapabilitiesKHR capabilities;
+
+        std::vector<vk::SurfaceFormatKHR> formats;
+
+        std::vector<vk::PresentModeKHR> presentModes;
+    };
+
     [[nodiscard]] QueueFamilyIndices findQueueFamilies(const vk::PhysicalDevice& device) const;
+
+    [[nodiscard]] SwapChainSupportDetails querySwapChainSupport(
+        const vk::PhysicalDevice& device) const;
+
+    static vk::SurfaceFormatKHR chooseSwapSurfaceFormat(
+        const std::vector<vk::SurfaceFormatKHR>& availableFormats);
+
+    static vk::PresentModeKHR chooseSwapPresentMode(
+        const std::vector<vk::PresentModeKHR>& availablePresentModes);
+
+    [[nodiscard]] vk::Extent2D chooseSwapExtent(
+        const vk::SurfaceCapabilitiesKHR& capabilities) const;
+
+    void createSwapChain();
+    void createImageViews();
 
     const int WIDTH = 800;
     const int HEIGHT = 600;
@@ -54,6 +79,12 @@ private:
 
     vk::Queue graphicsQueue_;
     vk::Queue presentQueue_;
+
+    vk::SwapchainKHR swapChain_;
+    std::vector<vk::Image> swapChainImages_;
+    vk::Format swapChainImageFormat_;
+    vk::Extent2D swapChainExtent_;
+    std::vector<vk::ImageView> swapChainImageViews_;
 
     const std::vector<const char*> validationLayers = {"VK_LAYER_KHRONOS_validation"};
 
