@@ -59,6 +59,8 @@ void VulkanEngine::cleanup()
         }
 
         device_.destroySwapchainKHR(swapChain_);
+
+        vmaDestroyAllocator(allocator_);
         device_.destroy();
     }
 
@@ -120,6 +122,8 @@ void VulkanEngine::initVulkan()
 
         pickPhysicalDevice();
         createLogicalDevice();
+
+        createAllocator();
 
         createSwapChain();
         createImageViews();
@@ -691,4 +695,21 @@ void VulkanEngine::drawFrame()
     (void)presentQueue_.presentKHR(presentInfo);
 
     currentFrame_ = (currentFrame_ + 1) % MAX_FRAMES_IN_FLIGHT;
+}
+
+void VulkanEngine::createAllocator()
+{
+    VmaAllocatorCreateInfo allocatorInfo = {};
+    allocatorInfo.physicalDevice = physicalDevice_;
+    allocatorInfo.device = device_;
+    allocatorInfo.instance = instance_;
+
+    allocatorInfo.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
+
+    if (vmaCreateAllocator(&allocatorInfo, &allocator_) != VK_SUCCESS)
+    {
+        throw std::runtime_error("Failed to create VMA Allocator");
+    }
+
+    spdlog::info("VMA Allocator created successfully");
 }

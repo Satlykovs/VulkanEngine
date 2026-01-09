@@ -2,6 +2,7 @@
 
 #include <optional>
 #include <vector>
+#include <vk_mem_alloc.h>
 #include <vulkan/vulkan.hpp>
 
 struct GLFWwindow;
@@ -25,6 +26,8 @@ private:
     void pickPhysicalDevice();
 
     void createLogicalDevice();
+
+    void createAllocator();
 
     void createGraphicsPipeline();
 
@@ -101,6 +104,8 @@ private:
     vk::CommandPool commandPool_;
 
     std::vector<vk::CommandBuffer> commandBuffers_;
+
+    VmaAllocator allocator_;
 
     static const int MAX_FRAMES_IN_FLIGHT = 2;
     std::vector<vk::Semaphore> imageAvailableSemaphores_;

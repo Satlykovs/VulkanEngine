@@ -26,8 +26,15 @@ FetchContent_MakeAvailable(glm)
 FetchContent_Declare(
         spdlog
         GIT_REPOSITORY https://github.com/gabime/spdlog.git
-        GIT_TAG        v1.12.0
+        GIT_TAG v1.12.0
 )
+
+
+FetchContent_Declare(
+        vma
+        GIT_REPOSITORY https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git
+)
+FetchContent_MakeAvailable(vma)
 
 FetchContent_MakeAvailable(spdlog)
 
@@ -41,6 +48,7 @@ target_link_libraries(MyEngine PRIVATE
         glfw
         glm::glm
         spdlog::spdlog
+        GPUOpen::VulkanMemoryAllocator
 
 )
 
@@ -93,7 +101,7 @@ foreach (SOURCE_FILE IN LISTS SHADERS)
             COMMENT "Compiling shader: ${SOURCE_FILE} -> ${OUTPUT_FILE}"
     )
 
-    list (APPEND SPV_FILES ${OUTPUT_FILE})
+    list(APPEND SPV_FILES ${OUTPUT_FILE})
 
 endforeach ()
 
