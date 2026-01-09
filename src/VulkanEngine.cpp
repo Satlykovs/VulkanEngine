@@ -5,11 +5,11 @@
 #include <algorithm>
 #include <fstream>
 #include <glfw/glfw3.h>
+#include <glm/ext/matrix_clip_space.hpp>
+#include <glm/ext/matrix_transform.hpp>
 #include <iostream>
 #include <limits>
 #include <set>
-
-#include "glm/ext/matrix_transform.hpp"
 
 void VulkanEngine::init()
 {
@@ -54,6 +54,9 @@ void VulkanEngine::cleanup()
 
         device_.destroyPipeline(graphicsPipeline_);
         device_.destroyPipelineLayout(pipelineLayout_);
+
+        device_.destroyImageView(depthImage_.imageView);
+        vmaDestroyImage(allocator_, depthImage_.image, depthImage_.allocation);
 
         for (auto imageView : swapChainImageViews_)
         {
@@ -132,6 +135,8 @@ void VulkanEngine::initVulkan()
 
         createSwapChain();
         createImageViews();
+
+        createDepthResources();
 
         createGraphicsPipeline();
 
@@ -527,6 +532,13 @@ void VulkanEngine::createGraphicsPipeline()
 
     vk::PipelineMultisampleStateCreateInfo multisampling({}, vk::SampleCountFlagBits::e1, VK_FALSE);
 
+    vk::PipelineDepthStencilStateCreateInfo depthStencil{};
+    depthStencil.depthTestEnable = vk::True;
+    depthStencil.depthWriteEnable = vk::True;
+    depthStencil.depthCompareOp = vk::CompareOp::eLess;
+    depthStencil.depthBoundsTestEnable = vk::False;
+    depthStencil.stencilTestEnable = vk::False;
+
     vk::PipelineColorBlendAttachmentState colorBlendAttachment;
     colorBlendAttachment.colorWriteMask =
         vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG |
@@ -553,7 +565,7 @@ void VulkanEngine::createGraphicsPipeline()
     }
 
     vk::PipelineRenderingCreateInfo renderingInfo({}, 1, &swapChainImageFormat_);
-    renderingInfo.depthAttachmentFormat = vk::Format::eUndefined;
+    renderingInfo.depthAttachmentFormat = depthFormat_;
     renderingInfo.stencilAttachmentFormat = vk::Format::eUndefined;
 
     // clang-format off
@@ -566,7 +578,7 @@ void VulkanEngine::createGraphicsPipeline()
         &viewportState,
         &rasterizer,
         &multisampling,
-        nullptr,
+        &depthStencil,
         &colorBlending,
         nullptr,
         pipelineLayout_,
@@ -652,10 +664,17 @@ void VulkanEngine::drawFrame()
     rotation += 90.0F * dt;
 
     glm::mat4 modelMatrix = glm::mat4(1.0F);
-    modelMatrix = glm::rotate(modelMatrix, glm::radians(rotation), glm::vec3(0.0F, 0.0F, 1.0F));
+    modelMatrix = glm::rotate(modelMatrix, glm::radians(rotation), glm::vec3(0.0F, 1.0F, 0.0F));
+
+    glm::mat4 view = glm::translate(glm::mat4(1.0F), glm::vec3(0.0F, 0.0F, -2.5F));
+
+    glm::mat4 projection = glm::perspective(
+        glm::radians(70.0F), static_cast<float>(WIDTH) / static_cast<float>(HEIGHT), 0.1F, 200.0F);
+
+    projection[1][1] *= -1;
 
     MeshPushConstants constants;
-    constants.renderMatrix = modelMatrix;
+    constants.renderMatrix = projection * view * modelMatrix;
 
     vk::Fence& inFlightFence = inFlightFences_[currentFrame_];
     vk::Semaphore& imageAvailableSemaphore = imageAvailableSemaphores_[currentFrame_];
@@ -693,6 +712,22 @@ void VulkanEngine::drawFrame()
                                   vk::PipelineStageFlagBits::eColorAttachmentOutput, {}, 0, nullptr,
                                   0, nullptr, 1, &imageBarrierToAttachment);
 
+    // clang-format off
+    vk::ImageMemoryBarrier depthBarrier(
+        {},
+        vk::AccessFlagBits::eDepthStencilAttachmentWrite,
+        vk::ImageLayout::eUndefined,
+        vk::ImageLayout::eDepthStencilAttachmentOptimal,
+        vk::QueueFamilyIgnored,
+        vk::QueueFamilyIgnored,
+        depthImage_.image,
+        {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1});
+
+    // clang-format on
+    commandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe,
+                                  vk::PipelineStageFlagBits::eEarlyFragmentTests, {}, 0, nullptr, 0,
+                                  nullptr, 1, &depthBarrier);
+
     vk::ClearValue clearColor(std::array<float, 4>{0.1F, 0.1F, 0.1F, 1.0F});
     vk::RenderingAttachmentInfo colorAttachment{};
     colorAttachment.imageView = swapChainImageViews_[imageIndex];
@@ -701,7 +736,15 @@ void VulkanEngine::drawFrame()
     colorAttachment.storeOp = vk::AttachmentStoreOp::eStore;
     colorAttachment.clearValue = clearColor;
 
-    vk::RenderingInfo renderInfo({}, {{0, 0}, swapChainExtent_}, 1, 0, 1, &colorAttachment);
+    vk::RenderingAttachmentInfo depthAttachment{};
+    depthAttachment.imageView = depthImage_.imageView;
+    depthAttachment.imageLayout = vk::ImageLayout::eDepthStencilAttachmentOptimal;
+    depthAttachment.loadOp = vk::AttachmentLoadOp::eClear;
+    depthAttachment.storeOp = vk::AttachmentStoreOp::eStore;
+    depthAttachment.clearValue.depthStencil = vk::ClearDepthStencilValue{1.0F, 0};
+
+    vk::RenderingInfo renderInfo({}, {{0, 0}, swapChainExtent_}, 1, 0, 1, &colorAttachment,
+                                 &depthAttachment, nullptr);
 
     commandBuffer.beginRendering(renderInfo);
     commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, graphicsPipeline_);
@@ -715,6 +758,14 @@ void VulkanEngine::drawFrame()
     commandBuffer.bindVertexBuffers(0, 1, vertexBuffers, offsets);
 
     commandBuffer.draw(3, 1, 0, 0);
+
+    glm::mat4 model2 = glm::translate(glm::mat4(1.0F), glm::vec3(0.5f, 0.5f, -10.0f));
+    constants.renderMatrix = projection * view * model2;
+
+    commandBuffer.pushConstants(pipelineLayout_, vk::ShaderStageFlagBits::eVertex, 0,
+                                sizeof(MeshPushConstants), &constants);
+    commandBuffer.draw(3, 1, 0, 0);
+
     commandBuffer.endRendering();
 
     // clang-format off
@@ -799,4 +850,53 @@ void VulkanEngine::initMesh()
     vmaUnmapMemory(allocator_, vertexBuffer_.allocation);
 
     spdlog::info("Triangle mesh uploaded to VRAM successfully");
+}
+
+void VulkanEngine::createDepthResources()
+{
+    depthFormat_ = vk::Format::eD32Sfloat;
+
+    vk::Extent3D depthImageExtent = {swapChainExtent_.width, swapChainExtent_.height, 1};
+
+    vk::ImageCreateInfo dImgInfo{};
+
+    dImgInfo.imageType = vk::ImageType::e2D;
+    dImgInfo.format = depthFormat_;
+    dImgInfo.extent = depthImageExtent;
+    dImgInfo.mipLevels = 1;
+    dImgInfo.arrayLayers = 1;
+    dImgInfo.samples = vk::SampleCountFlagBits::e1;
+    dImgInfo.tiling = vk::ImageTiling::eOptimal;
+    dImgInfo.usage = vk::ImageUsageFlagBits::eDepthStencilAttachment;
+
+    VmaAllocationCreateInfo dImgAllocInfo{};
+    dImgAllocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+    dImgAllocInfo.requiredFlags = VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+    if (vmaCreateImage(allocator_, (VkImageCreateInfo*)&dImgInfo, &dImgAllocInfo,
+                       &depthImage_.image, &depthImage_.allocation, nullptr) != VK_SUCCESS)
+    {
+        throw std::runtime_error("Failed to allocate depth image");
+    }
+
+    vk::ImageViewCreateInfo dViewInfo{};
+    dViewInfo.viewType = vk::ImageViewType::e2D;
+    dViewInfo.image = depthImage_.image;
+    dViewInfo.format = depthFormat_;
+    dViewInfo.subresourceRange.baseMipLevel = 0;
+    dViewInfo.subresourceRange.levelCount = 1;
+    dViewInfo.subresourceRange.baseArrayLayer = 0;
+    dViewInfo.subresourceRange.layerCount = 1;
+    dViewInfo.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eDepth;
+
+    try
+    {
+        depthImage_.imageView = device_.createImageView(dViewInfo);
+    }
+    catch (const vk::SystemError& err)
+    {
+        throw std::runtime_error(std::string("Failed to create depth image view: ") + err.what());
+    }
+
+    spdlog::info("Depth resources created successfully");
 }

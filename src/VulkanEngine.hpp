@@ -46,6 +46,13 @@ struct AllocatedBuffer
     VmaAllocationInfo info;
 };
 
+struct AllocatedImage
+{
+    VkImage image;
+    VmaAllocation allocation;
+    VkImageView imageView;
+};
+
 struct MeshPushConstants
 {
     glm::mat4 renderMatrix;
@@ -74,6 +81,8 @@ private:
     void createLogicalDevice();
 
     void createAllocator();
+
+    void createDepthResources();
     void initMesh();
 
     void createGraphicsPipeline();
@@ -155,6 +164,9 @@ private:
     VmaAllocator allocator_;
 
     AllocatedBuffer vertexBuffer_;
+
+    AllocatedImage depthImage_;
+    vk::Format depthFormat_;
 
     static const int MAX_FRAMES_IN_FLIGHT = 2;
     std::vector<vk::Semaphore> imageAvailableSemaphores_;
