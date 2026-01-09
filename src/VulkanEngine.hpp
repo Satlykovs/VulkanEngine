@@ -1,9 +1,49 @@
 #pragma once
 
+#include <glm/glm.hpp>
 #include <optional>
 #include <vector>
 #include <vk_mem_alloc.h>
 #include <vulkan/vulkan.hpp>
+
+struct Vertex
+{
+    glm::vec3 position;
+    glm::vec3 color;
+
+    static vk::VertexInputBindingDescription getBindingDescription()
+    {
+        vk::VertexInputBindingDescription bindingDescription{};
+        bindingDescription.binding = 0;
+        bindingDescription.stride = sizeof(Vertex);
+        bindingDescription.inputRate = vk::VertexInputRate::eVertex;
+        return bindingDescription;
+    }
+
+    static std::array<vk::VertexInputAttributeDescription, 2> getAttributeDecriptions()
+    {
+        std::array<vk::VertexInputAttributeDescription, 2> attributeDescriptions{};
+
+        attributeDescriptions[0].binding = 0;
+        attributeDescriptions[0].location = 0;
+        attributeDescriptions[0].format = vk::Format::eR32G32B32Sfloat;
+        attributeDescriptions[0].offset = offsetof(Vertex, position);
+
+        attributeDescriptions[1].binding = 0;
+        attributeDescriptions[1].location = 1;
+        attributeDescriptions[1].format = vk::Format::eR32G32B32Sfloat;
+        attributeDescriptions[1].offset = offsetof(Vertex, color);
+
+        return attributeDescriptions;
+    }
+};
+
+struct AllocatedBuffer
+{
+    VkBuffer buffer;
+    VmaAllocation allocation;
+    VmaAllocationInfo info;
+};
 
 struct GLFWwindow;
 
@@ -28,6 +68,7 @@ private:
     void createLogicalDevice();
 
     void createAllocator();
+    void initMesh();
 
     void createGraphicsPipeline();
 
@@ -106,6 +147,8 @@ private:
     std::vector<vk::CommandBuffer> commandBuffers_;
 
     VmaAllocator allocator_;
+
+    AllocatedBuffer vertexBuffer_;
 
     static const int MAX_FRAMES_IN_FLIGHT = 2;
     std::vector<vk::Semaphore> imageAvailableSemaphores_;

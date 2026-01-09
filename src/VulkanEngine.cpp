@@ -60,7 +60,10 @@ void VulkanEngine::cleanup()
 
         device_.destroySwapchainKHR(swapChain_);
 
+        vmaDestroyBuffer(allocator_, vertexBuffer_.buffer, vertexBuffer_.allocation);
+
         vmaDestroyAllocator(allocator_);
+
         device_.destroy();
     }
 
@@ -129,6 +132,8 @@ void VulkanEngine::initVulkan()
         createImageViews();
 
         createGraphicsPipeline();
+
+        initMesh();
 
         initSyncObjects();
     }
@@ -248,6 +253,11 @@ void VulkanEngine::createLogicalDevice()
 
     vk::PhysicalDeviceDynamicRenderingFeatures dynamicRenderingFeatures{};
     dynamicRenderingFeatures.dynamicRendering = VK_TRUE;
+
+    vk::PhysicalDeviceBufferDeviceAddressFeatures bufferDeviceAddressFeeatures{};
+    bufferDeviceAddressFeeatures.bufferDeviceAddress = VK_TRUE;
+
+    dynamicRenderingFeatures.pNext = bufferDeviceAddressFeeatures;
 
     vk::PhysicalDeviceFeatures2 deviceFeatures2{};
     deviceFeatures2.pNext = &dynamicRenderingFeatures;
@@ -492,7 +502,12 @@ void VulkanEngine::createGraphicsPipeline()
 
     vk::PipelineShaderStageCreateInfo shaderStages[] = {vertShaderStageInfo, fragShaderStageInfo};
 
-    vk::PipelineVertexInputStateCreateInfo vertexInputInfo({}, 0, nullptr, 0, nullptr);
+    auto bindingDescription = Vertex::getBindingDescription();
+    auto attributeDescription = Vertex::getAttributeDecriptions();
+
+    vk::PipelineVertexInputStateCreateInfo vertexInputInfo({}, 1, &bindingDescription,
+                                                           (uint32_t)attributeDescription.size(),
+                                                           attributeDescription.data());
 
     vk::PipelineInputAssemblyStateCreateInfo inputAssembly({}, vk::PrimitiveTopology::eTriangleList,
                                                            VK_FALSE);
@@ -661,6 +676,11 @@ void VulkanEngine::drawFrame()
 
     commandBuffer.beginRendering(renderInfo);
     commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, graphicsPipeline_);
+    vk::Buffer vertexBuffers[] = {vertexBuffer_.buffer};
+    VkDeviceSize offsets[] = {0};
+
+    commandBuffer.bindVertexBuffers(0, 1, vertexBuffers, offsets);
+
     commandBuffer.draw(3, 1, 0, 0);
     commandBuffer.endRendering();
 
@@ -712,4 +732,38 @@ void VulkanEngine::createAllocator()
     }
 
     spdlog::info("VMA Allocator created successfully");
+}
+
+void VulkanEngine::initMesh()
+{
+    std::vector<Vertex> vertices = {{{0.0F, -0.5F, 0.0F}, {1.0F, 0.0F, 0.0F}},
+                                    {{0.5F, 0.5F, 0.0F}, {0.0F, 1.0F, 0.0F}},
+                                    {{-0.5F, 0.5F, 0.0F}, {0.0F, 0.0F, 1.0F}}};
+
+    size_t bufferSize = vertices.size() * sizeof(Vertex);
+
+    vk::BufferCreateInfo bufferInfo{};
+
+    bufferInfo.size = bufferSize;
+
+    bufferInfo.usage = vk::BufferUsageFlagBits::eVertexBuffer;
+
+    VmaAllocationCreateInfo vmaAllocInfo{};
+    vmaAllocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
+
+    if (vmaCreateBuffer(allocator_, (VkBufferCreateInfo*)&bufferInfo, &vmaAllocInfo,
+                        &vertexBuffer_.buffer, &vertexBuffer_.allocation,
+                        &vertexBuffer_.info) != VK_SUCCESS)
+    {
+        throw std::runtime_error("Failed to allocate vertex buffer");
+    }
+
+    void* data;
+
+    vmaMapMemory(allocator_, vertexBuffer_.allocation, &data);
+    memcpy(data, vertices.data(), bufferSize);
+
+    vmaUnmapMemory(allocator_, vertexBuffer_.allocation);
+
+    spdlog::info("Triangle mesh uploaded to VRAM successfully");
 }
