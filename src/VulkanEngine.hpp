@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <glm/glm.hpp>
 #include <optional>
 #include <vector>
@@ -20,7 +21,7 @@ struct Vertex
         return bindingDescription;
     }
 
-    static std::array<vk::VertexInputAttributeDescription, 2> getAttributeDecriptions()
+    static std::array<vk::VertexInputAttributeDescription, 2> getAttributeDescriptions()
     {
         std::array<vk::VertexInputAttributeDescription, 2> attributeDescriptions{};
 
@@ -43,6 +44,11 @@ struct AllocatedBuffer
     VkBuffer buffer;
     VmaAllocation allocation;
     VmaAllocationInfo info;
+};
+
+struct MeshPushConstants
+{
+    glm::mat4 renderMatrix;
 };
 
 struct GLFWwindow;
@@ -156,6 +162,8 @@ private:
     std::vector<vk::Fence> inFlightFences_;
 
     uint32_t currentFrame_ = 0;
+
+    std::chrono::steady_clock::time_point lastFrameTime_;
 
     const std::vector<const char*> validationLayers = {"VK_LAYER_KHRONOS_validation"};
 

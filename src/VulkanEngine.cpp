@@ -9,6 +9,8 @@
 #include <limits>
 #include <set>
 
+#include "glm/ext/matrix_transform.hpp"
+
 void VulkanEngine::init()
 {
     spdlog::info("Initializing Engine...");
@@ -503,7 +505,7 @@ void VulkanEngine::createGraphicsPipeline()
     vk::PipelineShaderStageCreateInfo shaderStages[] = {vertShaderStageInfo, fragShaderStageInfo};
 
     auto bindingDescription = Vertex::getBindingDescription();
-    auto attributeDescription = Vertex::getAttributeDecriptions();
+    auto attributeDescription = Vertex::getAttributeDescriptions();
 
     vk::PipelineVertexInputStateCreateInfo vertexInputInfo({}, 1, &bindingDescription,
                                                            (uint32_t)attributeDescription.size(),
@@ -520,7 +522,7 @@ void VulkanEngine::createGraphicsPipeline()
     vk::PipelineViewportStateCreateInfo viewportState({}, 1, &viewport, 1, &scissor);
 
     vk::PipelineRasterizationStateCreateInfo rasterizer(
-        {}, VK_FALSE, VK_FALSE, vk::PolygonMode::eFill, vk::CullModeFlagBits::eBack,
+        {}, VK_FALSE, VK_FALSE, vk::PolygonMode::eFill, vk::CullModeFlagBits::eNone,
         vk::FrontFace::eClockwise, VK_FALSE, 0.0F, 0.0F, 0.0F, 1.0F);
 
     vk::PipelineMultisampleStateCreateInfo multisampling({}, vk::SampleCountFlagBits::e1, VK_FALSE);
@@ -534,7 +536,12 @@ void VulkanEngine::createGraphicsPipeline()
     vk::PipelineColorBlendStateCreateInfo colorBlending({}, VK_FALSE, vk::LogicOp::eCopy, 1,
                                                         &colorBlendAttachment);
 
-    vk::PipelineLayoutCreateInfo pipelineLayoutInfo({}, 0, nullptr, 0, nullptr);
+    vk::PushConstantRange pushConstantRange{};
+    pushConstantRange.offset = 0;
+    pushConstantRange.size = sizeof(MeshPushConstants);
+    pushConstantRange.stageFlags = vk::ShaderStageFlagBits::eVertex;
+
+    vk::PipelineLayoutCreateInfo pipelineLayoutInfo({}, 0, nullptr, 1, &pushConstantRange);
 
     try
     {
@@ -628,6 +635,28 @@ void VulkanEngine::initSyncObjects()
 
 void VulkanEngine::drawFrame()
 {
+    auto currentTime = std::chrono::steady_clock::now();
+
+    if (currentFrame_ == 0 && lastFrameTime_.time_since_epoch().count() == 0)
+    {
+        lastFrameTime_ = currentTime;
+    }
+
+    float dt =
+        std::chrono::duration<float, std::chrono::seconds::period>(currentTime - lastFrameTime_)
+            .count();
+    lastFrameTime_ = currentTime;
+
+    static float rotation = 0.0F;
+
+    rotation += 90.0F * dt;
+
+    glm::mat4 modelMatrix = glm::mat4(1.0F);
+    modelMatrix = glm::rotate(modelMatrix, glm::radians(rotation), glm::vec3(0.0F, 0.0F, 1.0F));
+
+    MeshPushConstants constants;
+    constants.renderMatrix = modelMatrix;
+
     vk::Fence& inFlightFence = inFlightFences_[currentFrame_];
     vk::Semaphore& imageAvailableSemaphore = imageAvailableSemaphores_[currentFrame_];
     vk::CommandBuffer& commandBuffer = commandBuffers_[currentFrame_];
@@ -676,6 +705,10 @@ void VulkanEngine::drawFrame()
 
     commandBuffer.beginRendering(renderInfo);
     commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, graphicsPipeline_);
+
+    commandBuffer.pushConstants(pipelineLayout_, vk::ShaderStageFlagBits::eVertex, 0,
+                                sizeof(MeshPushConstants), &constants);
+
     vk::Buffer vertexBuffers[] = {vertexBuffer_.buffer};
     VkDeviceSize offsets[] = {0};
 
