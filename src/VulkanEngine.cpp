@@ -11,6 +11,8 @@
 #include <limits>
 #include <set>
 
+#include "tiny_obj_loader.h"
+
 void VulkanEngine::init()
 {
     spdlog::info("Initializing Engine...");
@@ -65,7 +67,10 @@ void VulkanEngine::cleanup()
 
         device_.destroySwapchainKHR(swapChain_);
 
-        vmaDestroyBuffer(allocator_, vertexBuffer_.buffer, vertexBuffer_.allocation);
+        for (auto& mesh : meshes_)
+        {
+            vmaDestroyBuffer(allocator_, mesh.vertexBuffer.buffer, mesh.vertexBuffer.allocation);
+        }
 
         vmaDestroyAllocator(allocator_);
 
@@ -140,7 +145,7 @@ void VulkanEngine::initVulkan()
 
         createGraphicsPipeline();
 
-        initMesh();
+        loadMeshes();
 
         initSyncObjects();
     }
@@ -666,12 +671,10 @@ void VulkanEngine::drawFrame()
     glm::mat4 modelMatrix = glm::mat4(1.0F);
     modelMatrix = glm::rotate(modelMatrix, glm::radians(rotation), glm::vec3(0.0F, 1.0F, 0.0F));
 
-    glm::mat4 view = glm::translate(glm::mat4(1.0F), glm::vec3(0.0F, 0.0F, -2.5F));
+    glm::mat4 view = mainCamera_.getViewMatrix();
 
-    glm::mat4 projection = glm::perspective(
-        glm::radians(70.0F), static_cast<float>(WIDTH) / static_cast<float>(HEIGHT), 0.1F, 200.0F);
-
-    projection[1][1] *= -1;
+    glm::mat4 projection =
+        mainCamera_.getProjectionMatrix(static_cast<float>(WIDTH) / static_cast<float>(HEIGHT));
 
     MeshPushConstants constants;
     constants.renderMatrix = projection * view * modelMatrix;
@@ -749,22 +752,17 @@ void VulkanEngine::drawFrame()
     commandBuffer.beginRendering(renderInfo);
     commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, graphicsPipeline_);
 
-    commandBuffer.pushConstants(pipelineLayout_, vk::ShaderStageFlagBits::eVertex, 0,
-                                sizeof(MeshPushConstants), &constants);
+    for (const auto& mesh : meshes_)
+    {
+        vk::Buffer vertexBuffers[] = {mesh.vertexBuffer.buffer};
+        VkDeviceSize offsets[] = {0};
 
-    vk::Buffer vertexBuffers[] = {vertexBuffer_.buffer};
-    VkDeviceSize offsets[] = {0};
+        commandBuffer.bindVertexBuffers(0, 1, vertexBuffers, offsets);
+        commandBuffer.pushConstants(pipelineLayout_, vk::ShaderStageFlagBits::eVertex, 0,
+                                    sizeof(MeshPushConstants), &constants);
 
-    commandBuffer.bindVertexBuffers(0, 1, vertexBuffers, offsets);
-
-    commandBuffer.draw(3, 1, 0, 0);
-
-    glm::mat4 model2 = glm::translate(glm::mat4(1.0F), glm::vec3(0.5f, 0.5f, -10.0f));
-    constants.renderMatrix = projection * view * model2;
-
-    commandBuffer.pushConstants(pipelineLayout_, vk::ShaderStageFlagBits::eVertex, 0,
-                                sizeof(MeshPushConstants), &constants);
-    commandBuffer.draw(3, 1, 0, 0);
+        commandBuffer.draw(mesh.vertices.size(), 1, 0, 0);
+    }
 
     commandBuffer.endRendering();
 
@@ -818,38 +816,59 @@ void VulkanEngine::createAllocator()
     spdlog::info("VMA Allocator created successfully");
 }
 
-void VulkanEngine::initMesh()
+void VulkanEngine::loadMeshes()
 {
-    std::vector<Vertex> vertices = {{{0.0F, -0.5F, 0.0F}, {1.0F, 0.0F, 0.0F}},
-                                    {{0.5F, 0.5F, 0.0F}, {0.0F, 1.0F, 0.0F}},
-                                    {{-0.5F, 0.5F, 0.0F}, {0.0F, 0.0F, 1.0F}}};
+    tinyobj::attrib_t attrib;
+    std::vector<tinyobj::shape_t> shapes;
+    std::vector<tinyobj::material_t> materials;
+    std::string warn, err;
 
-    size_t bufferSize = vertices.size() * sizeof(Vertex);
+    std::string modelPath = "../assets/models/viking_room.obj";
 
-    vk::BufferCreateInfo bufferInfo{};
-
-    bufferInfo.size = bufferSize;
-
-    bufferInfo.usage = vk::BufferUsageFlagBits::eVertexBuffer;
-
-    VmaAllocationCreateInfo vmaAllocInfo{};
-    vmaAllocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
-
-    if (vmaCreateBuffer(allocator_, (VkBufferCreateInfo*)&bufferInfo, &vmaAllocInfo,
-                        &vertexBuffer_.buffer, &vertexBuffer_.allocation,
-                        &vertexBuffer_.info) != VK_SUCCESS)
+    if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, modelPath.c_str()))
     {
-        throw std::runtime_error("Failed to allocate vertex buffer");
+        throw std::runtime_error(warn + err);
     }
 
-    void* data;
+    for (const auto& shape : shapes)
+    {
+        Mesh newMesh;
+        for (const auto& index : shape.mesh.indices)
+        {
+            Vertex vertex{};
+            vertex.position = {attrib.vertices[3 * index.vertex_index + 0],
+                               attrib.vertices[3 * index.vertex_index + 1],
+                               attrib.vertices[3 * index.vertex_index + 2]};
 
-    vmaMapMemory(allocator_, vertexBuffer_.allocation, &data);
-    memcpy(data, vertices.data(), bufferSize);
+            vertex.color = vertex.position;  // TEMPORARY
 
-    vmaUnmapMemory(allocator_, vertexBuffer_.allocation);
+            newMesh.vertices.push_back(vertex);
+        }
+        size_t bufferSize = newMesh.vertices.size() * sizeof(Vertex);
 
-    spdlog::info("Triangle mesh uploaded to VRAM successfully");
+        vk::BufferCreateInfo bufferInfo{};
+        bufferInfo.size = bufferSize;
+        bufferInfo.usage = vk::BufferUsageFlagBits::eVertexBuffer;
+
+        VmaAllocationCreateInfo vmaAllocInfo{};
+        vmaAllocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
+
+        if (vmaCreateBuffer(allocator_, (VkBufferCreateInfo*)&bufferInfo, &vmaAllocInfo,
+                            &newMesh.vertexBuffer.buffer, &newMesh.vertexBuffer.allocation,
+                            &newMesh.vertexBuffer.info) != VK_SUCCESS)
+        {
+            throw std::runtime_error("Failed to allocate vertex buffer for mesh");
+        }
+
+        void* data;
+        vmaMapMemory(allocator_, newMesh.vertexBuffer.allocation, &data);
+        memcpy(data, newMesh.vertices.data(), bufferSize);
+        vmaUnmapMemory(allocator_, newMesh.vertexBuffer.allocation);
+
+        meshes_.push_back(newMesh);
+    }
+
+    spdlog::info("Loaded {} meshes from .obj file", meshes_.size());
 }
 
 void VulkanEngine::createDepthResources()

@@ -7,6 +7,8 @@
 #include <vk_mem_alloc.h>
 #include <vulkan/vulkan.hpp>
 
+#include "Camera.hpp"
+
 struct Vertex
 {
     glm::vec3 position;
@@ -46,6 +48,12 @@ struct AllocatedBuffer
     VmaAllocationInfo info;
 };
 
+struct Mesh
+{
+    std::vector<Vertex> vertices;
+    AllocatedBuffer vertexBuffer;
+};
+
 struct AllocatedImage
 {
     VkImage image;
@@ -83,7 +91,7 @@ private:
     void createAllocator();
 
     void createDepthResources();
-    void initMesh();
+    void loadMeshes();
 
     void createGraphicsPipeline();
 
@@ -163,7 +171,7 @@ private:
 
     VmaAllocator allocator_;
 
-    AllocatedBuffer vertexBuffer_;
+    std::vector<Mesh> meshes_;
 
     AllocatedImage depthImage_;
     vk::Format depthFormat_;
@@ -184,4 +192,6 @@ private:
 #else
     const bool enableValidationLayers = true;
 #endif
+
+    Camera mainCamera_;
 };

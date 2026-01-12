@@ -28,6 +28,7 @@ FetchContent_Declare(
         GIT_REPOSITORY https://github.com/gabime/spdlog.git
         GIT_TAG v1.12.0
 )
+FetchContent_MakeAvailable(spdlog)
 
 
 FetchContent_Declare(
@@ -36,7 +37,13 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(vma)
 
-FetchContent_MakeAvailable(spdlog)
+
+FetchContent_Declare(
+        tinyobjloader
+        GIT_REPOSITORY https://github.com/tinyobjloader/tinyobjloader.git
+        GIT_TAG        v2.0.0rc13
+)
+FetchContent_MakeAvailable(tinyobjloader)
 
 
 file(GLOB_RECURSE SOURCES "src/*.cpp" "src/*.hpp")
@@ -49,6 +56,7 @@ target_link_libraries(MyEngine PRIVATE
         glm::glm
         spdlog::spdlog
         GPUOpen::VulkanMemoryAllocator
+        tinyobjloader
 
 )
 
