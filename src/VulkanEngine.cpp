@@ -11,6 +11,7 @@
 #include <limits>
 #include <set>
 
+#include "stb_image.h"
 #include "tiny_obj_loader.h"
 
 void VulkanEngine::init()
@@ -57,8 +58,16 @@ void VulkanEngine::cleanup()
         device_.destroyPipeline(graphicsPipeline_);
         device_.destroyPipelineLayout(pipelineLayout_);
 
+        device_.destroyDescriptorPool(descriptorPool_);
+        device_.destroyDescriptorSetLayout(descriptorSetLayout_);
+
         device_.destroyImageView(depthImage_.imageView);
         vmaDestroyImage(allocator_, depthImage_.image, depthImage_.allocation);
+
+        device_.destroyImageView(textureImage_.imageView);
+        vmaDestroyImage(allocator_, textureImage_.image, textureImage_.allocation);
+
+        device_.destroySampler(textureSampler_);
 
         for (auto imageView : swapChainImageViews_)
         {
@@ -143,11 +152,15 @@ void VulkanEngine::initVulkan()
 
         createDepthResources();
 
+        initSyncObjects();
+        loadImages();
+        createTextureSampler();
+
+        initDescriptors();
+
         createGraphicsPipeline();
 
         loadMeshes();
-
-        initSyncObjects();
     }
     catch (const vk::SystemError& err)
     {
@@ -264,15 +277,17 @@ void VulkanEngine::createLogicalDevice()
     const std::vector<const char*> deviceExtensions = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
 
     vk::PhysicalDeviceDynamicRenderingFeatures dynamicRenderingFeatures{};
-    dynamicRenderingFeatures.dynamicRendering = VK_TRUE;
+    dynamicRenderingFeatures.dynamicRendering = vk::True;
 
     vk::PhysicalDeviceBufferDeviceAddressFeatures bufferDeviceAddressFeeatures{};
-    bufferDeviceAddressFeeatures.bufferDeviceAddress = VK_TRUE;
+    bufferDeviceAddressFeeatures.bufferDeviceAddress = vk::True;
 
     dynamicRenderingFeatures.pNext = bufferDeviceAddressFeeatures;
 
     vk::PhysicalDeviceFeatures2 deviceFeatures2{};
     deviceFeatures2.pNext = &dynamicRenderingFeatures;
+
+    deviceFeatures2.features.samplerAnisotropy = vk::True;
 
     vk::DeviceCreateInfo createInfo({}, queueCreateInfos, {}, deviceExtensions, nullptr);
 
@@ -407,7 +422,7 @@ void VulkanEngine::createSwapChain()
     createInfo.preTransform = swapChainSupport.capabilities.currentTransform;
     createInfo.compositeAlpha = vk::CompositeAlphaFlagBitsKHR::eOpaque;
     createInfo.presentMode = presentMode;
-    createInfo.clipped = VK_TRUE;
+    createInfo.clipped = vk::True;
     createInfo.oldSwapchain = nullptr;
 
     try
@@ -558,7 +573,8 @@ void VulkanEngine::createGraphicsPipeline()
     pushConstantRange.size = sizeof(MeshPushConstants);
     pushConstantRange.stageFlags = vk::ShaderStageFlagBits::eVertex;
 
-    vk::PipelineLayoutCreateInfo pipelineLayoutInfo({}, 0, nullptr, 1, &pushConstantRange);
+    vk::PipelineLayoutCreateInfo pipelineLayoutInfo({}, 1, &descriptorSetLayout_, 1,
+                                                    &pushConstantRange);
 
     try
     {
@@ -752,6 +768,9 @@ void VulkanEngine::drawFrame()
     commandBuffer.beginRendering(renderInfo);
     commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, graphicsPipeline_);
 
+    commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, pipelineLayout_, 0, 1,
+                                     &descriptorSet_, 0, nullptr);
+
     for (const auto& mesh : meshes_)
     {
         vk::Buffer vertexBuffers[] = {mesh.vertexBuffer.buffer};
@@ -842,6 +861,10 @@ void VulkanEngine::loadMeshes()
 
             vertex.color = vertex.position;  // TEMPORARY
 
+            vertex.uv = {attrib.texcoords[2 * index.texcoord_index + 0],
+                         attrib.texcoords[2 * index.texcoord_index +
+                                          1]};  // It works without 1.0f - ... (strange model =))
+
             newMesh.vertices.push_back(vertex);
         }
         size_t bufferSize = newMesh.vertices.size() * sizeof(Vertex);
@@ -918,4 +941,240 @@ void VulkanEngine::createDepthResources()
     }
 
     spdlog::info("Depth resources created successfully");
+}
+
+void VulkanEngine::loadImages()
+{
+    int texWidth, texHeight, texChannels;
+
+    stbi_uc* pixels = stbi_load("../assets/textures/viking_room.png", &texWidth, &texHeight,
+                                &texChannels, STBI_rgb_alpha);
+
+    if (!pixels)
+    {
+        throw std::runtime_error("Failed to load texture image");
+    }
+
+    vk::DeviceSize imageSize = static_cast<vk::DeviceSize>(texWidth) * texHeight * 4;
+
+    AllocatedBuffer stagingBuffer;
+
+    vk::BufferCreateInfo bufferInfo{};
+    bufferInfo.size = imageSize;
+    bufferInfo.usage = vk::BufferUsageFlagBits::eTransferSrc;
+
+    VmaAllocationCreateInfo vmaAllocInfo{};
+
+    vmaAllocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
+
+    if (vmaCreateBuffer(allocator_, (VkBufferCreateInfo*)&bufferInfo, &vmaAllocInfo,
+                        &stagingBuffer.buffer, &stagingBuffer.allocation, nullptr) != VK_SUCCESS)
+    {
+        throw std::runtime_error("Failed to create staging buffer for texture");
+    }
+
+    void* data;
+    vmaMapMemory(allocator_, stagingBuffer.allocation, &data);
+    memcpy(data, pixels, static_cast<size_t>(imageSize));
+    vmaUnmapMemory(allocator_, stagingBuffer.allocation);
+
+    stbi_image_free(pixels);
+
+    vk::Extent3D imageExtent = {static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight),
+                                1};
+
+    vk::ImageCreateInfo dImgInfo{};
+
+    dImgInfo.imageType = vk::ImageType::e2D;
+    dImgInfo.format = vk::Format::eR8G8B8A8Srgb;
+    dImgInfo.extent = imageExtent;
+    dImgInfo.mipLevels = 1;
+    dImgInfo.arrayLayers = 1;
+    dImgInfo.samples = vk::SampleCountFlagBits::e1;
+    dImgInfo.tiling = vk::ImageTiling::eOptimal;
+    dImgInfo.usage = vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled;
+
+    VmaAllocationCreateInfo dImgAllocInfo{};
+    dImgAllocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+
+    if (vmaCreateImage(allocator_, (VkImageCreateInfo*)&dImgInfo, &dImgAllocInfo,
+                       &textureImage_.image, &textureImage_.allocation, nullptr) != VK_SUCCESS)
+    {
+        throw std::runtime_error("Failed to allocate texture image");
+    }
+
+    spdlog::info("Texture loaded to staging buffer and memory allocated");
+
+    immediateSubmit(
+        [&](vk::CommandBuffer cmd)
+        {
+            // clang-format off
+
+            vk::ImageMemoryBarrier barrierToTransfer(
+           {},
+           vk::AccessFlagBits::eTransferWrite,
+           vk::ImageLayout::eUndefined,
+           vk::ImageLayout::eTransferDstOptimal,
+           vk::QueueFamilyIgnored,
+           vk::QueueFamilyIgnored,
+           textureImage_.image,
+           {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1});
+
+
+            cmd.pipelineBarrier(
+            vk::PipelineStageFlagBits::eTopOfPipe,
+            vk::PipelineStageFlagBits::eTransfer,
+            {},
+            0, nullptr,
+            0, nullptr,
+            1, &barrierToTransfer
+            );
+
+            // clang-format on
+
+            vk::BufferImageCopy copyRegion{};
+            copyRegion.bufferOffset = 0;
+            copyRegion.imageSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1};
+            copyRegion.imageExtent = imageExtent;
+
+            cmd.copyBufferToImage(stagingBuffer.buffer, textureImage_.image,
+                                  vk::ImageLayout::eTransferDstOptimal, 1, &copyRegion);
+
+            // clang-format off
+
+            vk::ImageMemoryBarrier barrierToShader(
+                vk::AccessFlagBits::eTransferWrite,
+                vk::AccessFlagBits::eShaderRead,
+                vk::ImageLayout::eTransferDstOptimal,
+                vk::ImageLayout::eShaderReadOnlyOptimal,
+                vk::QueueFamilyIgnored,
+                vk::QueueFamilyIgnored,
+                textureImage_.image,
+                {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1});
+
+            cmd.pipelineBarrier(
+                vk::PipelineStageFlagBits::eTransfer,
+                vk::PipelineStageFlagBits::eFragmentShader,
+                {},
+                0, nullptr,
+                0, nullptr,
+                1, &barrierToShader
+                );
+            // clang-format on
+        });
+
+    vmaDestroyBuffer(allocator_, stagingBuffer.buffer, stagingBuffer.allocation);
+
+    vk::ImageViewCreateInfo viewInfo{};
+    viewInfo.image = textureImage_.image;
+    viewInfo.viewType = vk::ImageViewType::e2D;
+    viewInfo.format = vk::Format::eR8G8B8A8Srgb;
+    viewInfo.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+    viewInfo.subresourceRange.baseMipLevel = 0;
+    viewInfo.subresourceRange.levelCount = 1;
+    viewInfo.subresourceRange.baseArrayLayer = 0;
+    viewInfo.subresourceRange.layerCount = 1;
+
+    try
+    {
+        textureImage_.imageView = device_.createImageView(viewInfo);
+    }
+    catch (const vk::SystemError& err)
+    {
+        throw std::runtime_error(std::string("Failed to create texture image view: ") + err.what());
+    }
+
+    spdlog::info("Texture loaded successfully");
+}
+
+void VulkanEngine::immediateSubmit(std::function<void(vk::CommandBuffer cmd)>&& function)
+{
+    vk::CommandBufferAllocateInfo allocInfo(commandPool_, vk::CommandBufferLevel::ePrimary, 1);
+
+    vk::CommandBuffer cmd = device_.allocateCommandBuffers(allocInfo)[0];
+
+    vk::CommandBufferBeginInfo beginInfo(vk::CommandBufferUsageFlagBits::eOneTimeSubmit);
+    cmd.begin(beginInfo);
+
+    function(cmd);
+    cmd.end();
+
+    vk::SubmitInfo submitInfo(0, nullptr, nullptr, 1, &cmd);
+
+    graphicsQueue_.submit(submitInfo);
+    graphicsQueue_.waitIdle();
+
+    device_.freeCommandBuffers(commandPool_, 1, &cmd);
+}
+
+void VulkanEngine::createTextureSampler()
+{
+    vk::PhysicalDeviceProperties properties = physicalDevice_.getProperties();
+
+    vk::SamplerCreateInfo samplerInfo{};
+
+    samplerInfo.magFilter = vk::Filter::eLinear;
+    samplerInfo.minFilter = vk::Filter::eLinear;
+
+    samplerInfo.addressModeU = vk::SamplerAddressMode::eRepeat;
+    samplerInfo.addressModeV = vk::SamplerAddressMode::eRepeat;
+    samplerInfo.addressModeW = vk::SamplerAddressMode::eRepeat;
+
+    samplerInfo.anisotropyEnable = vk::True;
+    samplerInfo.maxAnisotropy = properties.limits.maxSamplerAnisotropy;
+
+    samplerInfo.borderColor = vk::BorderColor::eIntOpaqueBlack;
+
+    samplerInfo.unnormalizedCoordinates = vk::False;
+
+    samplerInfo.compareEnable = vk::False;
+
+    samplerInfo.mipmapMode = vk::SamplerMipmapMode::eLinear;
+
+    try
+    {
+        textureSampler_ = device_.createSampler(samplerInfo);
+    }
+    catch (const vk::SystemError& err)
+    {
+        throw std::runtime_error(std::string("Failed to create texture sampler:") + err.what());
+    }
+}
+
+void VulkanEngine::initDescriptors()
+{
+    vk::DescriptorSetLayoutBinding samplerLayoutBinding{};
+    samplerLayoutBinding.binding = 0;
+    samplerLayoutBinding.descriptorCount = 1;
+    samplerLayoutBinding.descriptorType = vk::DescriptorType::eCombinedImageSampler;
+    samplerLayoutBinding.pImmutableSamplers = nullptr;
+    samplerLayoutBinding.stageFlags = vk::ShaderStageFlagBits::eFragment;
+
+    vk::DescriptorSetLayoutCreateInfo layoutInfo({}, 1, &samplerLayoutBinding);
+    descriptorSetLayout_ = device_.createDescriptorSetLayout(layoutInfo);
+
+    vk::DescriptorPoolSize poolSize(vk::DescriptorType::eCombinedImageSampler, 1);
+
+    vk::DescriptorPoolCreateInfo poolInfo({}, 1, 1, &poolSize);
+    descriptorPool_ = device_.createDescriptorPool(poolInfo);
+
+    vk::DescriptorSetAllocateInfo allocInfo(descriptorPool_, 1, &descriptorSetLayout_);
+    descriptorSet_ = device_.allocateDescriptorSets(allocInfo)[0];
+
+    vk::DescriptorImageInfo imageInfo{};
+
+    imageInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+    imageInfo.imageView = textureImage_.imageView;
+    imageInfo.sampler = textureSampler_;
+
+    vk::WriteDescriptorSet descriptorWrite{};
+
+    descriptorWrite.dstSet = descriptorSet_;
+    descriptorWrite.dstBinding = 0;
+    descriptorWrite.dstArrayElement = 0;
+    descriptorWrite.descriptorType = vk::DescriptorType::eCombinedImageSampler;
+    descriptorWrite.descriptorCount = 1;
+    descriptorWrite.pImageInfo = &imageInfo;
+
+    device_.updateDescriptorSets(1, &descriptorWrite, 0, nullptr);
 }

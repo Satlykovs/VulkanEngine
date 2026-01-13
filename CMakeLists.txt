@@ -41,9 +41,16 @@ FetchContent_MakeAvailable(vma)
 FetchContent_Declare(
         tinyobjloader
         GIT_REPOSITORY https://github.com/tinyobjloader/tinyobjloader.git
-        GIT_TAG        v2.0.0rc13
+        GIT_TAG v2.0.0rc13
 )
 FetchContent_MakeAvailable(tinyobjloader)
+
+
+FetchContent_Declare(
+        stb
+        GIT_REPOSITORY https://github.com/nothings/stb.git
+)
+FetchContent_MakeAvailable(stb)
 
 
 file(GLOB_RECURSE SOURCES "src/*.cpp" "src/*.hpp")
@@ -59,6 +66,8 @@ target_link_libraries(MyEngine PRIVATE
         tinyobjloader
 
 )
+
+target_include_directories(MyEngine PRIVATE ${stb_SOURCE_DIR})
 
 
 find_program(CLANG_FORMAT_EXE clang-format)

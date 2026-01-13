@@ -1,6 +1,7 @@
 #include <iostream>
 
 #include "VulkanEngine.hpp"
+#include "spdlog/spdlog.h"
 
 int main()
 {
@@ -14,7 +15,7 @@ int main()
     }
     catch (const std::exception& e)
     {
-        std::cerr << "CRITICAL ERROR: " << e.what() << '\n';
+        spdlog::critical(e.what());
         return 1;
     }
 
