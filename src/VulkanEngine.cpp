@@ -14,25 +14,11 @@
 #include "stb_image.h"
 #include "tiny_obj_loader.h"
 
-void VulkanEngine::init()
+void VulkanEngine::init(Window& window)
 {
     spdlog::info("Initializing Engine...");
-    initWindow();
+    window_ = &window;
     initVulkan();
-}
-
-void VulkanEngine::run()
-{
-    spdlog::info("Starting Main Loop");
-    while (!glfwWindowShouldClose(window_))
-    {
-        glfwPollEvents();
-        drawFrame();
-    }
-
-    device_.waitIdle();
-
-    spdlog::info("Main Loop Ended");
 }
 
 void VulkanEngine::cleanup()
@@ -95,21 +81,6 @@ void VulkanEngine::cleanup()
     {
         instance_.destroy();
     }
-
-    if (window_ != nullptr)
-    {
-        glfwDestroyWindow(window_);
-    }
-
-    glfwTerminate();
-}
-
-void VulkanEngine::initWindow()
-{
-    glfwInit();
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-    window_ = glfwCreateWindow(WIDTH, HEIGHT, "Vulkan Engine", nullptr, nullptr);
 }
 
 void VulkanEngine::initVulkan()
@@ -311,7 +282,8 @@ void VulkanEngine::createSurface()
 {
     VkSurfaceKHR surface;
 
-    if (glfwCreateWindowSurface(instance_, window_, nullptr, &surface) != VK_SUCCESS)
+    if (glfwCreateWindowSurface(instance_, window_->getNativeWindow(), nullptr, &surface) !=
+        VK_SUCCESS)
     {
         throw std::runtime_error("Failed to create window surface");
     }
@@ -370,7 +342,7 @@ vk::Extent2D VulkanEngine::chooseSwapExtent(const vk::SurfaceCapabilitiesKHR& ca
 
     int width;
     int height;
-    glfwGetFramebufferSize(window_, &width, &height);
+    window_->getFrameBufferSize(width, height);
 
     vk::Extent2D actualExtent = {static_cast<uint32_t>(width), static_cast<uint32_t>(height)};
 
@@ -666,35 +638,8 @@ void VulkanEngine::initSyncObjects()
     spdlog::info("Sync objects created successfully");
 }
 
-void VulkanEngine::drawFrame()
+void VulkanEngine::drawFrame(const SceneData& sceneData)
 {
-    auto currentTime = std::chrono::steady_clock::now();
-
-    if (currentFrame_ == 0 && lastFrameTime_.time_since_epoch().count() == 0)
-    {
-        lastFrameTime_ = currentTime;
-    }
-
-    float dt =
-        std::chrono::duration<float, std::chrono::seconds::period>(currentTime - lastFrameTime_)
-            .count();
-    lastFrameTime_ = currentTime;
-
-    static float rotation = 0.0F;
-
-    rotation += 90.0F * dt;
-
-    glm::mat4 modelMatrix = glm::mat4(1.0F);
-    modelMatrix = glm::rotate(modelMatrix, glm::radians(rotation), glm::vec3(0.0F, 1.0F, 0.0F));
-
-    glm::mat4 view = mainCamera_.getViewMatrix();
-
-    glm::mat4 projection =
-        mainCamera_.getProjectionMatrix(static_cast<float>(WIDTH) / static_cast<float>(HEIGHT));
-
-    MeshPushConstants constants;
-    constants.renderMatrix = projection * view * modelMatrix;
-
     vk::Fence& inFlightFence = inFlightFences_[currentFrame_];
     vk::Semaphore& imageAvailableSemaphore = imageAvailableSemaphores_[currentFrame_];
     vk::CommandBuffer& commandBuffer = commandBuffers_[currentFrame_];
@@ -777,6 +722,10 @@ void VulkanEngine::drawFrame()
         VkDeviceSize offsets[] = {0};
 
         commandBuffer.bindVertexBuffers(0, 1, vertexBuffers, offsets);
+
+        MeshPushConstants constants;
+        constants.renderMatrix = sceneData.projectionMatrix * sceneData.viewMatrix * mesh.transform;
+
         commandBuffer.pushConstants(pipelineLayout_, vk::ShaderStageFlagBits::eVertex, 0,
                                     sizeof(MeshPushConstants), &constants);
 
@@ -867,6 +816,9 @@ void VulkanEngine::loadMeshes()
 
             newMesh.vertices.push_back(vertex);
         }
+
+        newMesh.transform = glm::mat4(1.0f);
+
         size_t bufferSize = newMesh.vertices.size() * sizeof(Vertex);
 
         vk::BufferCreateInfo bufferInfo{};

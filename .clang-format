@@ -28,8 +28,8 @@ FixNamespaceComments: true
 
 AllowShortFunctionsOnASingleLine: Empty
 
-AllowShortIfStatementsOnASingleLine: false
-AllowShortLoopsOnASingleLine: false
+AllowShortIfStatementsOnASingleLine: true
+AllowShortLoopsOnASingleLine: true
 
 
 AlignAfterOpenBracket: Align

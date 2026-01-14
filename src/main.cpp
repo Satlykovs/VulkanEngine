@@ -1,16 +1,113 @@
-#include <iostream>
-
+#include "Camera.hpp"
 #include "VulkanEngine.hpp"
+#include "Window.hpp"
 #include "spdlog/spdlog.h"
+
+float lastX = 400;
+float lastY = 300;
+bool firstMouse = true;
+
+struct KeyAction
+{
+    int key;
+    CameraMovement movement;
+};
+
+static const std::array<KeyAction, 6> keyMappings = {{{GLFW_KEY_W, CameraMovement::FORWARD},
+                                                      {GLFW_KEY_S, CameraMovement::BACKWARD},
+                                                      {GLFW_KEY_A, CameraMovement::LEFT},
+                                                      {GLFW_KEY_D, CameraMovement::RIGHT},
+                                                      {GLFW_KEY_Q, CameraMovement::DOWN},
+                                                      {GLFW_KEY_E, CameraMovement::UP}}};
+
+void processInput(Window& window, Camera& camera, float deltaTime)
+{
+    GLFWwindow* nativeWin = window.getNativeWindow();
+
+    if (glfwGetMouseButton(nativeWin, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS)
+    {
+        window.setMouseCapture(true);
+
+        double xPos;
+        double yPos;
+        glfwGetCursorPos(nativeWin, &xPos, &yPos);
+
+        if (firstMouse)
+        {
+            lastX = static_cast<float>(xPos);
+            lastY = static_cast<float>(yPos);
+            firstMouse = false;
+        }
+
+        float xOffset = static_cast<float>(xPos) - lastX;
+        float yOffset = static_cast<float>(yPos) - lastY;
+
+        lastX = static_cast<float>(xPos);
+        lastY = static_cast<float>(yPos);
+
+        camera.processMouseMovement(xOffset, yOffset);
+
+        if (glfwGetKey(nativeWin, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS)
+            camera.movementSpeed = 10.0f;
+        else
+            camera.movementSpeed = 2.5f;
+
+        for (const auto& mapping : keyMappings)
+        {
+            if (glfwGetKey(nativeWin, mapping.key) == GLFW_PRESS)
+            {
+                camera.processKeyboard(mapping.movement, deltaTime);
+            }
+        }
+    }
+    else
+    {
+        window.setMouseCapture(false);
+        firstMouse = true;
+    }
+}
 
 int main()
 {
-    VulkanEngine engine;
-
     try
     {
-        engine.init();
-        engine.run();
+        Window window(800, 600, "Vulkan Engine");
+
+        VulkanEngine engine;
+        engine.init(window);
+
+        Camera camera;
+
+        auto lastTime = std::chrono::steady_clock::now();
+
+        while (!window.shouldClose())
+        {
+            window.pollEvents();
+
+            auto currentTime = std::chrono::steady_clock::now();
+
+            int width;
+            int height;
+
+            window.getFrameBufferSize(width, height);
+            if (width == 0 || height == 0) continue;
+
+            float aspectRatio = static_cast<float>(width) / static_cast<float>(height);
+
+            float dt = static_cast<std::chrono::duration<float>>(currentTime - lastTime).count();
+
+            lastTime = currentTime;
+
+            processInput(window, camera, dt);
+
+            SceneData sceneData;
+            sceneData.viewMatrix = camera.getViewMatrix();
+            sceneData.projectionMatrix = camera.getProjectionMatrix(aspectRatio);
+
+            engine.drawFrame(sceneData);
+        }
+
+        engine.waitIdle();
         engine.cleanup();
     }
     catch (const std::exception& e)

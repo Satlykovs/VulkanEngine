@@ -7,7 +7,7 @@
 #include <vk_mem_alloc.h>
 #include <vulkan/vulkan.hpp>
 
-#include "Camera.hpp"
+#include "Window.hpp"
 
 struct Vertex
 {
@@ -58,6 +58,7 @@ struct Mesh
 {
     std::vector<Vertex> vertices;
     AllocatedBuffer vertexBuffer;
+    glm::mat4 transform;
 };
 
 struct AllocatedImage
@@ -72,20 +73,27 @@ struct MeshPushConstants
     glm::mat4 renderMatrix;
 };
 
-struct GLFWwindow;
+struct SceneData
+{
+    glm::mat4 viewMatrix;
+    glm::mat4 projectionMatrix;
+};
 
 class VulkanEngine
 {
 public:
-    void init();
-
-    void run();
+    void init(Window& window);
 
     void cleanup();
 
-private:
-    void initWindow();
+    void drawFrame(const SceneData& sceneData);
 
+    void waitIdle()
+    {
+        device_.waitIdle();
+    }
+
+private:
     void initVulkan();
 
     void createSurface();
@@ -108,8 +116,6 @@ private:
     void createGraphicsPipeline();
 
     void initSyncObjects();
-
-    void drawFrame();
 
     [[nodiscard]] bool checkValidationLayerSupport() const;
 
@@ -153,11 +159,7 @@ private:
     static std::vector<char> readFile(const std::string& filename);
     vk::ShaderModule createShaderModule(const std::vector<char>& code);
 
-    const int WIDTH = 800;
-    const int HEIGHT = 600;
-
-    GLFWwindow* window_ = nullptr;
-
+    Window* window_ = nullptr;
     vk::Instance instance_;
     vk::SurfaceKHR surface_;
 
@@ -214,6 +216,4 @@ private:
 #else
     const bool enableValidationLayers = true;
 #endif
-
-    Camera mainCamera_;
 };
