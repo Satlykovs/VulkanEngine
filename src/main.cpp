@@ -13,12 +13,13 @@ struct KeyAction
     CameraMovement movement;
 };
 
-static const std::array<KeyAction, 6> keyMappings = {{{GLFW_KEY_W, CameraMovement::FORWARD},
-                                                      {GLFW_KEY_S, CameraMovement::BACKWARD},
-                                                      {GLFW_KEY_A, CameraMovement::LEFT},
-                                                      {GLFW_KEY_D, CameraMovement::RIGHT},
-                                                      {GLFW_KEY_Q, CameraMovement::DOWN},
-                                                      {GLFW_KEY_E, CameraMovement::UP}}};
+static const std::array<KeyAction, 6> keyMappings = {
+    {{.key = GLFW_KEY_W, .movement = CameraMovement::FORWARD},
+     {.key = 83, .movement = CameraMovement::BACKWARD},
+     {.key = GLFW_KEY_A, .movement = CameraMovement::LEFT},
+     {.key = GLFW_KEY_D, .movement = CameraMovement::RIGHT},
+     {.key = GLFW_KEY_Q, .movement = CameraMovement::DOWN},
+     {.key = GLFW_KEY_E, .movement = CameraMovement::UP}}};
 
 void processInput(Window& window, Camera& camera, float deltaTime)
 {
@@ -48,9 +49,9 @@ void processInput(Window& window, Camera& camera, float deltaTime)
         camera.processMouseMovement(xOffset, yOffset);
 
         if (glfwGetKey(nativeWin, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS)
-            camera.movementSpeed = 10.0f;
+            camera.movementSpeed = 10.0F;
         else
-            camera.movementSpeed = 2.5f;
+            camera.movementSpeed = 2.5F;
 
         for (const auto& mapping : keyMappings)
         {
@@ -82,7 +83,7 @@ int main()
 
         while (!window.shouldClose())
         {
-            window.pollEvents();
+            Window::pollEvents();
 
             auto currentTime = std::chrono::steady_clock::now();
 

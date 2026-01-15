@@ -111,7 +111,7 @@ public:
 
     void drawFrame(const SceneData& sceneData);
 
-    void waitIdle()
+    void waitIdle() const
     {
         device_.waitIdle();
     }
@@ -180,7 +180,7 @@ private:
     void createImageViews();
 
     static std::vector<char> readFile(const std::string& filename);
-    vk::ShaderModule createShaderModule(const std::vector<char>& code);
+    vk::ShaderModule createShaderModule(const std::vector<char>& code) const;
 
     Window* window_ = nullptr;
     vk::Instance instance_;
@@ -223,7 +223,7 @@ private:
     AllocatedImage depthImage_;
     vk::Format depthFormat_;
 
-    static const int MAX_FRAMES_IN_FLIGHT = 2;
+    static constexpr int MAX_FRAMES_IN_FLIGHT = 2;
     std::vector<vk::Semaphore> imageAvailableSemaphores_;
     std::vector<vk::Semaphore> renderFinishedSemaphores_;
     std::vector<vk::Fence> inFlightFences_;

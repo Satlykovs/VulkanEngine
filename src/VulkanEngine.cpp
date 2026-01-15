@@ -2,11 +2,9 @@
 
 #include <spdlog/spdlog.h>
 #define GLFW_INCLUDE_VULKAN
+#include <GLFW/glfw3.h>
 #include <algorithm>
 #include <fstream>
-#include <glfw/glfw3.h>
-#include <glm/ext/matrix_clip_space.hpp>
-#include <glm/ext/matrix_transform.hpp>
 #include <iostream>
 #include <limits>
 #include <set>
@@ -252,10 +250,10 @@ void VulkanEngine::createLogicalDevice()
     vk::PhysicalDeviceDynamicRenderingFeatures dynamicRenderingFeatures{};
     dynamicRenderingFeatures.dynamicRendering = vk::True;
 
-    vk::PhysicalDeviceBufferDeviceAddressFeatures bufferDeviceAddressFeeatures{};
-    bufferDeviceAddressFeeatures.bufferDeviceAddress = vk::True;
+    vk::PhysicalDeviceBufferDeviceAddressFeatures bufferDeviceAddressFeatures{};
+    bufferDeviceAddressFeatures.bufferDeviceAddress = vk::True;
 
-    dynamicRenderingFeatures.pNext = bufferDeviceAddressFeeatures;
+    dynamicRenderingFeatures.pNext = bufferDeviceAddressFeatures;
 
     vk::PhysicalDeviceFeatures2 deviceFeatures2{};
     deviceFeatures2.pNext = &dynamicRenderingFeatures;
@@ -472,11 +470,10 @@ std::vector<char> VulkanEngine::readFile(const std::string& filename)
     return buffer;
 }
 
-vk::ShaderModule VulkanEngine::createShaderModule(const std::vector<char>& code)
+vk::ShaderModule VulkanEngine::createShaderModule(const std::vector<char>& code) const
 {
     vk::ShaderModuleCreateInfo createInfo({}, code.size(),
                                           reinterpret_cast<const uint32_t*>(code.data()));
-
     try
     {
         return device_.createShaderModule(createInfo);
@@ -511,7 +508,7 @@ void VulkanEngine::createGraphicsPipeline()
                                                            attributeDescription.data());
 
     vk::PipelineInputAssemblyStateCreateInfo inputAssembly({}, vk::PrimitiveTopology::eTriangleList,
-                                                           VK_FALSE);
+                                                           vk::False);
 
     vk::Viewport viewport(0.0F, 0.0F, static_cast<float>(swapChainExtent_.width),
                           static_cast<float>(swapChainExtent_.height), 0.0F, 1.0F);
@@ -521,10 +518,10 @@ void VulkanEngine::createGraphicsPipeline()
     vk::PipelineViewportStateCreateInfo viewportState({}, 1, &viewport, 1, &scissor);
 
     vk::PipelineRasterizationStateCreateInfo rasterizer(
-        {}, VK_FALSE, VK_FALSE, vk::PolygonMode::eFill, vk::CullModeFlagBits::eBack,
-        vk::FrontFace::eCounterClockwise, VK_FALSE, 0.0F, 0.0F, 0.0F, 1.0F);
+        {}, vk::False, vk::False, vk::PolygonMode::eFill, vk::CullModeFlagBits::eBack,
+        vk::FrontFace::eCounterClockwise, vk::False, 0.0F, 0.0F, 0.0F, 1.0F);
 
-    vk::PipelineMultisampleStateCreateInfo multisampling({}, vk::SampleCountFlagBits::e1, VK_FALSE);
+    vk::PipelineMultisampleStateCreateInfo multisampling({}, vk::SampleCountFlagBits::e1, vk::False);
 
     vk::PipelineDepthStencilStateCreateInfo depthStencil{};
     depthStencil.depthTestEnable = vk::True;
@@ -537,9 +534,9 @@ void VulkanEngine::createGraphicsPipeline()
     colorBlendAttachment.colorWriteMask =
         vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG |
         vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA;
-    colorBlendAttachment.blendEnable = VK_FALSE;
+    colorBlendAttachment.blendEnable = vk::False;
 
-    vk::PipelineColorBlendStateCreateInfo colorBlending({}, VK_FALSE, vk::LogicOp::eCopy, 1,
+    vk::PipelineColorBlendStateCreateInfo colorBlending({}, vk::False, vk::LogicOp::eCopy, 1,
                                                         &colorBlendAttachment);
 
     vk::PushConstantRange pushConstantRange{};
@@ -896,7 +893,7 @@ void VulkanEngine::createDepthResources()
 
     VmaAllocationCreateInfo dImgAllocInfo{};
     dImgAllocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
-    dImgAllocInfo.requiredFlags = VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    dImgAllocInfo.requiredFlags = static_cast<VkMemoryPropertyFlags>(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
     if (vmaCreateImage(allocator_, (VkImageCreateInfo*)&dImgInfo, &dImgAllocInfo,
                        &depthImage_.image, &depthImage_.allocation, nullptr) != VK_SUCCESS)

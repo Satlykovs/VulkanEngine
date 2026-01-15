@@ -2,7 +2,7 @@
 
 #include <glm/glm.hpp>
 
-enum class CameraMovement
+enum class CameraMovement : uint8_t
 {
     FORWARD,
     BACKWARD,
