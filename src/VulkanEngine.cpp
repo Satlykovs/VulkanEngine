@@ -65,6 +65,8 @@ void VulkanEngine::cleanup()
         for (auto& mesh : meshes_)
         {
             vmaDestroyBuffer(allocator_, mesh.vertexBuffer.buffer, mesh.vertexBuffer.allocation);
+
+            vmaDestroyBuffer(allocator_, mesh.indexBuffer.buffer, mesh.indexBuffer.allocation);
         }
 
         vmaDestroyAllocator(allocator_);
@@ -519,8 +521,8 @@ void VulkanEngine::createGraphicsPipeline()
     vk::PipelineViewportStateCreateInfo viewportState({}, 1, &viewport, 1, &scissor);
 
     vk::PipelineRasterizationStateCreateInfo rasterizer(
-        {}, VK_FALSE, VK_FALSE, vk::PolygonMode::eFill, vk::CullModeFlagBits::eNone,
-        vk::FrontFace::eClockwise, VK_FALSE, 0.0F, 0.0F, 0.0F, 1.0F);
+        {}, VK_FALSE, VK_FALSE, vk::PolygonMode::eFill, vk::CullModeFlagBits::eBack,
+        vk::FrontFace::eCounterClockwise, VK_FALSE, 0.0F, 0.0F, 0.0F, 1.0F);
 
     vk::PipelineMultisampleStateCreateInfo multisampling({}, vk::SampleCountFlagBits::e1, VK_FALSE);
 
@@ -723,13 +725,15 @@ void VulkanEngine::drawFrame(const SceneData& sceneData)
 
         commandBuffer.bindVertexBuffers(0, 1, vertexBuffers, offsets);
 
+        commandBuffer.bindIndexBuffer(mesh.indexBuffer.buffer, 0, vk::IndexType::eUint32);
+
         MeshPushConstants constants;
         constants.renderMatrix = sceneData.projectionMatrix * sceneData.viewMatrix * mesh.transform;
 
         commandBuffer.pushConstants(pipelineLayout_, vk::ShaderStageFlagBits::eVertex, 0,
                                     sizeof(MeshPushConstants), &constants);
 
-        commandBuffer.draw(mesh.vertices.size(), 1, 0, 0);
+        commandBuffer.drawIndexed(static_cast<uint32_t>(mesh.indices.size()), 1, 0, 0, 0);
     }
 
     commandBuffer.endRendering();
@@ -801,6 +805,10 @@ void VulkanEngine::loadMeshes()
     for (const auto& shape : shapes)
     {
         Mesh newMesh;
+        newMesh.transform = glm::mat4(1.0F);
+
+        std::unordered_map<Vertex, uint32_t> uniqueVertices{};
+
         for (const auto& index : shape.mesh.indices)
         {
             Vertex vertex{};
@@ -814,10 +822,14 @@ void VulkanEngine::loadMeshes()
                          attrib.texcoords[2 * index.texcoord_index +
                                           1]};  // It works without 1.0f - ... (strange model =))
 
-            newMesh.vertices.push_back(vertex);
-        }
+            if (!uniqueVertices.contains(vertex))
+            {
+                uniqueVertices[vertex] = static_cast<uint32_t>(newMesh.vertices.size());
 
-        newMesh.transform = glm::mat4(1.0f);
+                newMesh.vertices.push_back(vertex);
+            }
+            newMesh.indices.push_back(uniqueVertices[vertex]);
+        }
 
         size_t bufferSize = newMesh.vertices.size() * sizeof(Vertex);
 
@@ -840,10 +852,29 @@ void VulkanEngine::loadMeshes()
         memcpy(data, newMesh.vertices.data(), bufferSize);
         vmaUnmapMemory(allocator_, newMesh.vertexBuffer.allocation);
 
+        size_t indexBufferSize = newMesh.indices.size() * sizeof(uint32_t);
+
+        vk::BufferCreateInfo indexBufferInfo{};
+        indexBufferInfo.size = indexBufferSize;
+        indexBufferInfo.usage = vk::BufferUsageFlagBits::eIndexBuffer;
+
+        if (vmaCreateBuffer(allocator_, (VkBufferCreateInfo*)&indexBufferInfo, &vmaAllocInfo,
+                            &newMesh.indexBuffer.buffer, &newMesh.indexBuffer.allocation,
+                            &newMesh.indexBuffer.info) != VK_SUCCESS)
+        {
+            throw std::runtime_error("Failed to allocate index buffer");
+        }
+
+        vmaMapMemory(allocator_, newMesh.indexBuffer.allocation, &data);
+        memcpy(data, newMesh.indices.data(), indexBufferSize);
+        vmaUnmapMemory(allocator_, newMesh.indexBuffer.allocation);
+
         meshes_.push_back(newMesh);
+        spdlog::info("Loaded shape [{}]: {} vertices, {} indices", shape.name,
+                     newMesh.vertices.size(), newMesh.indices.size());
     }
 
-    spdlog::info("Loaded {} meshes from .obj file", meshes_.size());
+    spdlog::info("Model loading complete. Total objects: {}", meshes_.size());
 }
 
 void VulkanEngine::createDepthResources()

@@ -94,13 +94,14 @@ int main()
 
             float aspectRatio = static_cast<float>(width) / static_cast<float>(height);
 
-            float dt = static_cast<std::chrono::duration<float>>(currentTime - lastTime).count();
+            float deltaTime =
+                static_cast<std::chrono::duration<float>>(currentTime - lastTime).count();
 
             lastTime = currentTime;
 
-            processInput(window, camera, dt);
+            processInput(window, camera, deltaTime);
 
-            SceneData sceneData;
+            SceneData sceneData{};
             sceneData.viewMatrix = camera.getViewMatrix();
             sceneData.projectionMatrix = camera.getProjectionMatrix(aspectRatio);
 

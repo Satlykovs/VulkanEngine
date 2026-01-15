@@ -1,7 +1,10 @@
 #pragma once
 
+#define GLM_ENABLE_EXPERIMENTAL
+
 #include <chrono>
 #include <glm/glm.hpp>
+#include <glm/gtx/hash.hpp>
 #include <optional>
 #include <vector>
 #include <vk_mem_alloc.h>
@@ -14,6 +17,11 @@ struct Vertex
     glm::vec3 position;
     glm::vec3 color;
     glm::vec2 uv;
+
+    bool operator==(const Vertex& other) const
+    {
+        return position == other.position && color == other.color && uv == other.uv;
+    }
 
     static vk::VertexInputBindingDescription getBindingDescription()
     {
@@ -40,13 +48,24 @@ struct Vertex
 
         attributeDescriptions[2].binding = 0;
         attributeDescriptions[2].location = 2;
-        attributeDescriptions[2].format = vk::Format::eR32G32B32A32Sfloat;
+        attributeDescriptions[2].format = vk::Format::eR32G32Sfloat;
         attributeDescriptions[2].offset = offsetof(Vertex, uv);
 
         return attributeDescriptions;
     }
 };
 
+template <>
+struct std::hash<Vertex>
+{
+    size_t operator()(Vertex const& vertex) const noexcept
+    {
+        return ((std::hash<glm::vec3>()(vertex.position) ^
+                 (std::hash<glm::vec3>()(vertex.color) << 1)) >>
+                1) ^
+               (std::hash<glm::vec2>()(vertex.uv) << 1);
+    }
+};
 struct AllocatedBuffer
 {
     VkBuffer buffer;
@@ -57,7 +76,11 @@ struct AllocatedBuffer
 struct Mesh
 {
     std::vector<Vertex> vertices;
+    std::vector<uint32_t> indices;
+
     AllocatedBuffer vertexBuffer;
+    AllocatedBuffer indexBuffer;
+
     glm::mat4 transform;
 };
 

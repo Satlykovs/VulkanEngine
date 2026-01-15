@@ -14,17 +14,17 @@ public:
     Window(const Window&) = delete;
     Window& operator=(const Window&) = delete;
 
-    bool shouldClose() const
+    [[nodiscard]] bool shouldClose() const
     {
         return glfwWindowShouldClose(window_);
     }
 
-    void pollEvents() const
+    static void pollEvents()
     {
-        return glfwPollEvents();
+        glfwPollEvents();
     }
 
-    GLFWwindow* getNativeWindow() const
+    [[nodiscard]] GLFWwindow* getNativeWindow() const
     {
         return window_;
     }
