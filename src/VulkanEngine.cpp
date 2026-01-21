@@ -45,20 +45,12 @@ void VulkanEngine::cleanup()
         device_.destroyDescriptorPool(descriptorPool_);
         device_.destroyDescriptorSetLayout(descriptorSetLayout_);
 
-        device_.destroyImageView(depthImage_.imageView);
-        vmaDestroyImage(allocator_, depthImage_.image, depthImage_.allocation);
-
         device_.destroyImageView(textureImage_.imageView);
         vmaDestroyImage(allocator_, textureImage_.image, textureImage_.allocation);
 
         device_.destroySampler(textureSampler_);
 
-        for (auto imageView : swapChainImageViews_)
-        {
-            device_.destroyImageView(imageView);
-        }
-
-        device_.destroySwapchainKHR(swapChain_);
+        destroySwawpChainResources();
 
         for (auto& mesh : meshes_)
         {
@@ -118,10 +110,7 @@ void VulkanEngine::initVulkan()
 
         createAllocator();
 
-        createSwapChain();
-        createImageViews();
-
-        createDepthResources();
+        initSwapChainResources();
 
         initSyncObjects();
         loadImages();
@@ -521,7 +510,8 @@ void VulkanEngine::createGraphicsPipeline()
         {}, vk::False, vk::False, vk::PolygonMode::eFill, vk::CullModeFlagBits::eBack,
         vk::FrontFace::eCounterClockwise, vk::False, 0.0F, 0.0F, 0.0F, 1.0F);
 
-    vk::PipelineMultisampleStateCreateInfo multisampling({}, vk::SampleCountFlagBits::e1, vk::False);
+    vk::PipelineMultisampleStateCreateInfo multisampling({}, vk::SampleCountFlagBits::e1,
+                                                         vk::False);
 
     vk::PipelineDepthStencilStateCreateInfo depthStencil{};
     depthStencil.depthTestEnable = vk::True;
@@ -556,6 +546,12 @@ void VulkanEngine::createGraphicsPipeline()
         throw std::runtime_error(std::string("Failed to create Pipeline Layout: ") + err.what());
     }
 
+    std::vector<vk::DynamicState> dynamicStates = {vk::DynamicState::eViewport,
+                                                   vk::DynamicState::eScissor};
+
+    vk::PipelineDynamicStateCreateInfo dynamicStateInfo(
+        {}, static_cast<uint32_t>(dynamicStates.size()), dynamicStates.data());
+
     vk::PipelineRenderingCreateInfo renderingInfo({}, 1, &swapChainImageFormat_);
     renderingInfo.depthAttachmentFormat = depthFormat_;
     renderingInfo.stencilAttachmentFormat = vk::Format::eUndefined;
@@ -572,7 +568,7 @@ void VulkanEngine::createGraphicsPipeline()
         &multisampling,
         &depthStencil,
         &colorBlending,
-        nullptr,
+        &dynamicStateInfo,
         pipelineLayout_,
         nullptr
     );
@@ -644,12 +640,30 @@ void VulkanEngine::drawFrame(const SceneData& sceneData)
     vk::CommandBuffer& commandBuffer = commandBuffers_[currentFrame_];
 
     (void)device_.waitForFences(1, &inFlightFence, vk::True, UINT64_MAX);
+
+    uint32_t imageIndex;
+    try
+    {
+        auto acquireResult =
+            device_.acquireNextImageKHR(swapChain_, UINT64_MAX, imageAvailableSemaphore, nullptr);
+        if (acquireResult.result == vk::Result::eErrorOutOfDateKHR)
+        {
+            recreateSwapChain();
+            return;
+        }
+        imageIndex = acquireResult.value;
+    }
+    catch (const vk::SystemError& err)
+    {
+        if (err.code() == vk::Result::eErrorOutOfDateKHR)
+        {
+            recreateSwapChain();
+            return;
+        }
+        throw;
+    }
+
     (void)device_.resetFences(1, &inFlightFence);
-
-    auto acquireResult =
-        device_.acquireNextImageKHR(swapChain_, UINT64_MAX, imageAvailableSemaphore, nullptr);
-
-    uint32_t imageIndex = acquireResult.value;
 
     vk::Semaphore& renderFinishedSemaphore = renderFinishedSemaphores_[imageIndex];
 
@@ -712,6 +726,13 @@ void VulkanEngine::drawFrame(const SceneData& sceneData)
     commandBuffer.beginRendering(renderInfo);
     commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, graphicsPipeline_);
 
+    vk::Viewport viewport(0.0F, 0.0F, static_cast<float>(swapChainExtent_.width),
+                          static_cast<float>(swapChainExtent_.height), 0.0F, 1.0F);
+
+    commandBuffer.setViewport(0, 1, &viewport);
+    vk::Rect2D scissor({0, 0}, swapChainExtent_);
+    commandBuffer.setScissor(0, 1, &scissor);
+
     commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, pipelineLayout_, 0, 1,
                                      &descriptorSet_, 0, nullptr);
 
@@ -763,7 +784,29 @@ void VulkanEngine::drawFrame(const SceneData& sceneData)
 
     vk::PresentInfoKHR presentInfo(1, &renderFinishedSemaphore, 1, &swapChain_, &imageIndex);
 
-    (void)presentQueue_.presentKHR(presentInfo);
+    try
+    {
+        auto res = presentQueue_.presentKHR(presentInfo);
+
+        if (res == vk::Result::eErrorOutOfDateKHR || res == vk::Result::eSuboptimalKHR ||
+            window_->wasWindowResized())
+        {
+            recreateSwapChain();
+            window_->resetWindowResizedFlag();
+        }
+    }
+    catch (const vk::SystemError& err)
+    {
+        if (err.code() == vk::Result::eErrorOutOfDateKHR)
+        {
+            recreateSwapChain();
+            window_->resetWindowResizedFlag();
+        }
+        else
+        {
+            throw;
+        }
+    }
 
     currentFrame_ = (currentFrame_ + 1) % MAX_FRAMES_IN_FLIGHT;
 }
@@ -893,9 +936,10 @@ void VulkanEngine::createDepthResources()
 
     VmaAllocationCreateInfo dImgAllocInfo{};
     dImgAllocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
-    dImgAllocInfo.requiredFlags = static_cast<VkMemoryPropertyFlags>(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    dImgAllocInfo.requiredFlags =
+        static_cast<VkMemoryPropertyFlags>(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
-    if (vmaCreateImage(allocator_, (VkImageCreateInfo*)&dImgInfo, &dImgAllocInfo,
+    if (vmaCreateImage(allocator_, reinterpret_cast<VkImageCreateInfo*>(&dImgInfo), &dImgAllocInfo,
                        &depthImage_.image, &depthImage_.allocation, nullptr) != VK_SUCCESS)
     {
         throw std::runtime_error("Failed to allocate depth image");
@@ -1157,4 +1201,45 @@ void VulkanEngine::initDescriptors()
     descriptorWrite.pImageInfo = &imageInfo;
 
     device_.updateDescriptorSets(1, &descriptorWrite, 0, nullptr);
+}
+
+void VulkanEngine::initSwapChainResources()
+{
+    createSwapChain();
+    createImageViews();
+    createDepthResources();
+}
+
+void VulkanEngine::destroySwawpChainResources()
+{
+    device_.destroyImageView(depthImage_.imageView);
+    vmaDestroyImage(allocator_, depthImage_.image, depthImage_.allocation);
+
+    for (auto imageView : swapChainImageViews_)
+    {
+        device_.destroyImageView(imageView);
+    }
+
+    device_.destroySwapchainKHR(swapChain_);
+}
+
+void VulkanEngine::recreateSwapChain()
+{
+    int width = 0;
+    int height = 0;
+
+    window_->getFrameBufferSize(width, height);
+
+    while (width == 0 || height == 0)
+    {
+        window_->getFrameBufferSize(width, height);
+        Window::waitEvents();
+    }
+
+    device_.waitIdle();
+
+    destroySwawpChainResources();
+    initSwapChainResources();
+
+    spdlog::info("Swapchain recreated");
 }

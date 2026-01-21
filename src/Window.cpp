@@ -7,7 +7,7 @@ Window::Window(int width, int height, std::string title)
 {
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+    glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
 
     window_ = glfwCreateWindow(width_, height_, title_.c_str(), nullptr, nullptr);
 
@@ -16,6 +16,10 @@ Window::Window(int width, int height, std::string title)
         glfwTerminate();
         throw std::runtime_error("Failed to create window");
     }
+
+    glfwSetWindowUserPointer(window_, this);
+
+    glfwSetFramebufferSizeCallback(window_, frameBufferResizedCallback);
 }
 
 Window::~Window()
@@ -25,4 +29,14 @@ Window::~Window()
         glfwDestroyWindow(window_);
     }
     glfwTerminate();
+}
+
+void Window::frameBufferResizedCallback(GLFWwindow* window, int width, int height)
+{
+    auto appWindow = reinterpret_cast<Window*>(glfwGetWindowUserPointer(window));
+
+    if (appWindow)
+    {
+        appWindow->frameBufferResized_ = true;
+    }
 }

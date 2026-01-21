@@ -24,6 +24,11 @@ public:
         glfwPollEvents();
     }
 
+    static void waitEvents()
+    {
+        glfwWaitEvents();
+    }
+
     [[nodiscard]] GLFWwindow* getNativeWindow() const
     {
         return window_;
@@ -46,9 +51,23 @@ public:
         }
     }
 
+    bool wasWindowResized()
+    {
+        return frameBufferResized_;
+    }
+
+    void resetWindowResizedFlag()
+    {
+        frameBufferResized_ = false;
+    }
+
 private:
     GLFWwindow* window_;
     int width_;
     int height_;
     std::string title_;
+
+    bool frameBufferResized_ = false;
+
+    static void frameBufferResizedCallback(GLFWwindow* window, int width, int height);
 };

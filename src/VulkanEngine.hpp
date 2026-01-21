@@ -180,7 +180,7 @@ private:
     void createImageViews();
 
     static std::vector<char> readFile(const std::string& filename);
-    vk::ShaderModule createShaderModule(const std::vector<char>& code) const;
+    [[nodiscard]] vk::ShaderModule createShaderModule(const std::vector<char>& code) const;
 
     Window* window_ = nullptr;
     vk::Instance instance_;
@@ -239,4 +239,9 @@ private:
 #else
     const bool enableValidationLayers = true;
 #endif
+
+    void recreateSwapChain();
+
+    void initSwapChainResources();
+    void destroySwawpChainResources();
 };
